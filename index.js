@@ -429,9 +429,9 @@ module.exports = class {
 		value = value; // .replace(this.regex.url.whitespace, '');
 		
 		if(value.startsWith('blob:') && data.type == 'js' && module.browser){
-			var raw = global._pm_.url_store.get(value);
+			var raw = global.$rw.urls.get(value);
 			
-			if(raw)return (URL.createObjectURL[_pm_.original] || URL.createObjectURL)(new Blob([ this.js(raw, { url: data.base, origin: data.origin }) ]));
+			if(raw)return (URL.createObjectURL[_pm_.orig] || URL.createObjectURL)(new Blob([ this.js(raw, { url: data.base, origin: data.origin }) ]));
 		}
 		
 		if(value.match(this.regex.url.proto) && !this.protocols.some(proto => value.startsWith(proto)))return value;
@@ -510,7 +510,7 @@ module.exports = class {
 		
 		var id = this.checksum(value);
 		
-		if(data.scope !== false)value = js_imports.join('\n') + '{/*pmrw' + id + '*/let fills=' + (data.global == true ? '_pm_.fills' : `(${this.glm})(${this.wrap(data.url + '')},new((()=>{${this.prw}})())(${this.str_conf()}))`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';' + value.replace(this.regex.js.prw_ins, (match, ind) => prws[ind]) + '\n' + (value.match(this.regex.js.sourceurl) ? '' : '//# sourceURL=' + encodeURI((this.valid_url(data.url) + '').replace(this.regex.js.comment, '::') || 'RWVM' + id) + '\n') + '/*pmrw' + id + '*/}';
+		if(data.scope !== false)value = js_imports.join('\n') + '{/*pmrw' + id + '*/let fills=' + (data.global == true ? '$rw.fills' : `(${this.glm})(${this.wrap(data.url + '')},new((()=>{${this.prw}})())(${this.str_conf()}))`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';' + value.replace(this.regex.js.prw_ins, (match, ind) => prws[ind]) + '\n' + (value.match(this.regex.js.sourceurl) ? '' : '//# sourceURL=' + encodeURI((this.valid_url(data.url) + '').replace(this.regex.js.comment, '::') || 'RWVM' + id) + '\n') + '/*pmrw' + id + '*/}';
 		
 		return value;
 	}
@@ -940,6 +940,26 @@ module.exports = class {
 		});
 	}
 	/**
+	* Retrieves global data/creates if needed
+	* @param {Object} global
+	* @param {URL} url
+	* @returns {Object}
+	*/
+	get_globals(global){
+		if(!global.$rw)global.$rw = {
+			backups: new Map(),
+			proxied: new Map(),
+			origina: new Map(),
+			blob: new Map(),
+			urls: new Map(),
+			prox: '$rw.prox',
+			orig: '$rw.orig',
+			url: this.valid_url(this.unurl(global.location)),
+		};
+		
+		return global.$rw;
+	}
+	/**
 	* Globals, called in the client to set any global data or get the proper fills object
 	* @param {URL} Local URL incase the global object is not set
 	* @param {Object} Rewriter instance
@@ -948,80 +968,31 @@ module.exports = class {
 	globals(url, rw){
 		var global = new (_=>_).constructor('return this')(),
 			URL = rw.URL,
-			_pm_ = global._pm_ || (global._pm_ = { prox_vals: Object.setPrototypeOf({ 'Array.prototype': [ 'indexOf', Array.prototype.indexOf ] }, null), backups: Object.setPrototypeOf({}, null), blob_store: new Map(), url_store: new Map(), url: new URL(url), proxied: 'pm.proxied', original: 'pm.original' }),
+			_pm_ = rw.get_globals(global),
 			Reflect = Object.fromEntries(Object.getOwnPropertyNames(global.Reflect).map(key => [ key, global.Reflect[key] ])),
-			pdef = {
-				// stateless map
-				mget(object, key, key1){
-					var array = typeof object == 'object' ? object[key] : null;
-					if(!array)return;
-					
-					var index = Reflect.apply(_pm_.backups['Array.prototype'][1], array, [ key ]);
-					
-					if((index % 2) == 0 && index != -1)return array[index + 1];
-				},
-				mset(object, key, key1, value){
-					// key1 must be string or symbol
-					
-					var array = typeof object == 'object' ? (object[key1] || (object[key1] = [])) : null;
-					if(!array)return;
-					
-					var index = Reflect.apply(_pm_.backups['Array.prototype'][1], array, [ key ]);
-					
-					if((index % 2) == 0 && index != -1)Reflect.apply(_pm_.backups['Array.prototype'][1], array, [ index, 2 ]);
-					
-					array.push(key, value);
-					
-					return value;
-				},
-				$backup: (obj, prop) => pdef.mget(_pm_.backups, obj, prop) || pdef.mset(_pm_.backups, obj, prop, obj[prop]),
-			},
-			Proxy = pdef.$backup(global, 'Proxy'),
+			backup = (obj, key, sub) => (sub = _pm_.backups.has(obj) ? _pm_.backups.get(obj) : _pm_.backups.set(obj, {}), sub[key] || (sub[key] = obj[key])),
+			Proxy = backup(global, 'Proxy'),
 			def = {
-				...pdef,
 				rw_data: data => Object.assign({ url: fills.url, base: fills.url, origin: def.loc }, data ? data : {}),
-				handler: (tg, prox_targ) => (Object.defineProperties(prox_targ, Object.fromEntries(Object.entries(Object.getOwnPropertyDescriptors(tg)).map(([ key, val ]) => (val.hasOwnProperty('configurable') && (val.configurable = true), [ key, val ])))), {
+				handler: (tg, desc, pt) => (pt = Object.setPrototypeOf({}, null), new Proxy(pt, Object.assign(Object.defineProperties(pt, Object.fromEntries(Object.entries(Object.getOwnPropertyDescriptors(tg)).map(([ key, val ]) => (val.hasOwnProperty('configurable') && (val.configurable = true), [ key, val ])))), {
 					set: (t, prop, value) => Reflect.set(tg, prop, value),
 					has: (t, ...a) => Reflect.has(tg, ...a),
 					ownKeys: (t, ...a) => Reflect.ownKeys(tg, ...a),
 					enumerate: (t, ...a) => Reflect.enumerate(tg, ...a),
-					getOwnPropertyDescriptor: (t, p) => Reflect.getOwnPropertyDescriptor(prox_targ, p),
-					defineProperty: (t, prop, desc) => {
-						
-						Reflect.defineProperty(prox_targ, prop, desc);
-						
-						return Reflect.defineProperty(tg, prop, desc);
-					},
+					getOwnPropertyDescriptor: (t, p) => Reflect.getOwnPropertyDescriptor(pt, p),
+					defineProperty: (t, prop, desc) => (Reflect.defineProperty(pt, prop, desc), Reflect.defineProperty(tg, prop, desc)),
 					deleteProperty: (t, ...a) => Reflect.deleteProperty(tg, ...a),
 					getPrototypeOf: t => Reflect.getPrototypeOf(tg),
 					setPrototypeOf: (t, ...a) => Reflect.setPrototypeOf(tg, ...a),
 					isExtensible: t => Reflect.isExtensible(tg),
 					preventExtensions: t => Reflect.preventExtensions(tg),
-				}),
+				}, desc))),
 				bind: (a, b) => Reflect.apply(def.restore(Function.prototype.bind)[0], a, [ b ]),
-				is_native: func => typeof func == 'function' && Reflect.apply(def.$backup(Function.prototype, 'toString'), func, []) == 'function ' + func.name + '() { [native code] }',
-				storage_handler: {
-					get: (target, prop, receiver, ret) => prop == _pm_.original ? target : prop == _pm_.proxied ? receiver : (typeof (ret = Reflect.get(target, prop)) == 'function' ? def.bind(ret, target) : target.getItem(prop)),
-					set: (target, prop, value) => (target.setItem(prop, value), true),
-				},
-				has_prop: (obj, prop) => prop && obj && Reflect.apply(def.restore(def.$backup(Object.prototype, 'hasOwnProperty'))[0], obj, [ prop ]),
-				alt_prop: (obj, prop) => def.has_prop(obj, prop) ? obj[prop] : null,
-				assign_func: (func, bind) => func[_pm_.proxied] || ((func[_pm_.original] = func)[_pm_.proxied] = Object.defineProperties(def.bind(def.is_native(func) ? new Proxy(func, { construct: (target, args) => Reflect.construct(target, def.restore(...args)), apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)) }) : func, bind), Object.getOwnPropertyDescriptors(func)), func[_pm_.proxied]),
-				proxy_targets: {
-					/* blank class to remove all native object methods */
-					win: Object.setPrototypeOf({}, null),
-					doc: Object.setPrototypeOf({}, null),
-					url: Object.setPrototypeOf({}, null),
-				},
-				defineprop_handler: {
-					apply(target, that, [ obj, prop, desc ]){
-						if(obj && obj[_pm_.original])desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true;
-						
-						return Reflect.apply(target, that, [ obj, prop, desc ]);
-					},
-				},
-				restore: (...args) => Reflect.apply(def.$backup(Array.prototype, 'map'), args, [ arg => arg ? arg[_pm_.original] || arg : arg ]),
-				proxify: (...args) => Reflect.apply(def.$backup(Array.prototype, 'map'), args, [ arg => arg ? arg[_pm_.proxied] || arg : arg ]),
+				is_native: func => typeof func == 'function' && Reflect.apply(backup(Function.prototype, 'toString'), func, []) == 'function ' + func.name + '() { [native code] }',
+				has_prop: (obj, prop) => prop && obj && Reflect.apply(def.restore(backup(Object.prototype, 'hasOwnProperty'))[0], obj, [ prop ]),
+				assign_func: (func, bind) => func[_pm_.prox] || ((func[_pm_.orig] = func)[_pm_.prox] = Object.defineProperties(def.bind(def.is_native(func) ? new Proxy(func, { construct: (target, args) => Reflect.construct(target, def.restore(...args)), apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)) }) : func, bind), Object.getOwnPropertyDescriptors(func)), func[_pm_.prox]),
+				restore: (...args) => Reflect.apply(backup(Array.prototype, 'map'), args, [ arg => arg ? arg[_pm_.orig] || arg : arg ]),
+				proxify: (...args) => Reflect.apply(backup(Array.prototype, 'map'), args, [ arg => arg ? arg[_pm_.prox] || arg : arg ]),
 				prefix: {
 					origin: prop => prop.split('@').splice(-1).join(''),
 					name: prop => (typeof prop != 'string' ? 'prop' : prop) + '@' + new URL(rw.unurl(def.get_href(), { origin: def.loc })).hostname,
@@ -1031,7 +1002,6 @@ module.exports = class {
 					var x = def.loc ? def.loc.href : null;
 					
 					if(!x || !x.hostname)try{ x = global.parent.location.href }catch(err){}
-					
 					try{ x = new URL(x) }catch(err){};
 					
 					return x;
@@ -1048,7 +1018,6 @@ module.exports = class {
 					},
 				},
 				win_binds: {
-					// called without scope only with window.eval, not literal eval
 					eval: new Proxy(global.eval, { apply: (target, that, [ script ]) => Reflect.apply(target, that, [ global.pm_eval(script) ]) }),
 					constructor: global.Window,
 					Window: global.Window,
@@ -1060,7 +1029,7 @@ module.exports = class {
 				},
 				doc_binds: {
 					get URL(){ return fills.url.href },
-					get referrer(){ return def.doc.referrer ? new URL(rw.unurl(def.doc.referrer, def.loc, fills.url, { origin: def.loc })||{href:''}).href : fills.url.href },
+					get referrer(){ return def.doc.referrer ? new URL(rw.unurl(def.doc.referrer, def.loc, fills.url, { origin: def.loc })||{}).href : fills.url.href },
 					get location(){ return fills.url },
 					set location(value){ return fills.url.href = value },
 					get domain(){ return fills.url.hostname },
@@ -1068,38 +1037,48 @@ module.exports = class {
 			};
 		
 		// backup CRITICAL props
-		def.$backup(Function.prototype, 'toString');
-		def.$backup(Function.prototype, 'bind');
-		def.$backup(Object.prototype, 'hasOwnProperty');
-		def.$backup(Array.prototype, 'indexOf');
-		def.$backup(Array.prototype, 'splice');
-		def.$backup(Array.prototype, 'map');
+		backup(Function.prototype, 'toString');
+		backup(Function.prototype, 'bind');
+		backup(Object.prototype, 'hasOwnProperty');
+		backup(Array.prototype, 'indexOf');
+		backup(Array.prototype, 'splice');
+		backup(Array.prototype, 'map');
 		
 		def.loc = def.restore(global.location)[0];
 		def.doc = def.restore(global.document)[0];
 		
-		[ _pm_.original, _pm_.proxied ].forEach(prop => !def.has_prop(global.Object.prototype, prop) && Object.defineProperty(global.Object.prototype, prop, {
+		if(!def.has_prop(global.Object.prototype, _pm_.prox))Object.defineProperty(global.Object.prototype, _pm_.prox, {
 			get(){
-				return def.mget(_pm_.prox_vals, this, '$' + prop);
+				return _pm_.proxied.get(this);
 			},
 			set(value){
-				return def.mset(_pm_.prox_vals, this, '$' + prop, value);
+				return _pm_.proxied.set(this, value);
 			},
-		}));
+		});
+		
+		if(!def.has_prop(global.Object.prototype, _pm_.orig))Object.defineProperty(global.Object.prototype, _pm_.orig, {
+			get(){
+				return _pm_.origina.get(this);
+			},
+			set(value){
+				return _pm_.origina.set(this, value);
+			},
+		});
+		
+		
 		
 		var fills = _pm_.fills = {
-			this: new Proxy(global, Object.assign(def.handler(global, def.proxy_targets.win), {
-				get: (t, prop, rec, ret) => prop == _pm_.proxied ? fills.this : prop == _pm_.original ? global : typeof (ret = Reflect.get(def.has_prop(def.win_binds, prop) ? def.win_binds : global, prop)) == 'function' ? def.assign_func(ret, global) : ret && ret[_pm_.proxied] || ret,
+			this: def.handler(global, {
+				get: (t, prop, rec, ret) => prop == _pm_.prox ? fills.this : prop == _pm_.orig ? global : typeof (ret = Reflect.get(def.has_prop(def.win_binds, prop) ? def.win_binds : global, prop)) == 'function' ? def.assign_func(ret, global) : ret && ret[_pm_.prox] || ret,
 				set: (t, prop, value) => def.has_prop(def.win_binds, prop) ? (def.win_binds[prop] = value) : Reflect.set(global, prop, value),
-			})),
-			doc: def.doc ? new Proxy(def.proxy_targets.doc, Object.assign(def.handler(def.doc, def.proxy_targets.doc), {
-				get: (t, prop, rec, ret) => prop == _pm_.proxied ? fills.doc : prop == _pm_.original ? def.doc : def.has_prop(def.doc_binds, prop) ? def.doc_binds[prop] : (typeof (ret = Reflect.get(def.doc, prop))) == 'function'
-					? def.assign_func(ret, def.doc) : ret,
+			}),
+			doc: def.doc ? def.handler(def.doc, {
+				get: (t, prop, rec, ret) => prop == _pm_.prox ? fills.doc : prop == _pm_.orig ? def.doc : def.has_prop(def.doc_binds, prop) ? def.doc_binds[prop] : (typeof (ret = Reflect.get(def.doc, prop))) == 'function' ? def.assign_func(ret, def.doc) : ret,
 				set: (t, prop, value) => Object.getOwnPropertyDescriptor(def.doc_binds, prop) ? (def.doc_binds[prop] = value) : Reflect.set(def.doc, prop, value),
-			})) : undefined,
+			}) : undefined,
 			_url: def.loc ? new URL(rw.unurl(def.loc, { origin: def.loc })) : undefined,
-			url: def.loc ? new Proxy(def.proxy_targets.url, Object.assign(def.handler(def.loc, def.proxy_targets.url), {
-				get: (target, prop, ret) => prop == _pm_.proxied ? fills.url : prop == _pm_.original ? def.loc : def.alt_prop(def.url_binds, prop) || (fills._url.href = rw.unurl(def.loc, { origin: def.loc }), typeof (ret = fills._url[prop]) == 'function' ? def.bind(ret, fills._url) : ret),
+			url: def.loc ? def.handler(def.loc, {
+				get: (target, prop, ret) => prop == _pm_.prox ? fills.url : prop == _pm_.orig ? def.loc : def.has_prop(def.url_binds, prop) && def.url_binds[prop] || (fills._url.href = rw.unurl(def.loc, { origin: def.loc }), typeof (ret = fills._url[prop]) == 'function' ? def.bind(ret, fills._url) : ret),
 				set(target, prop, value){
 					fills._url.href = rw.unurl(def.loc, { origin: def.loc });
 					
@@ -1113,11 +1092,11 @@ module.exports = class {
 					
 					return true;
 				},
-			})) : undefined,
+			}) : undefined,
 		};
 		
-		global[_pm_.proxied] = fills.this;
-		if(def.doc)def.doc[_pm_.proxied] = fills.doc;
+		global[_pm_.prox] = fills.this;
+		if(def.doc)def.doc[_pm_.prox] = fills.doc;
 		
 		global.rw_this = that => def.proxify(that)[0];
 		// get scope => eval inside of scope
@@ -1125,7 +1104,7 @@ module.exports = class {
 		global.prop_eval = data => new Function('return(_=>' + rw.js(atob(decodeURIComponent(data)), def.rw_data()) + ')()')();
 		
 		[
-			[ x => x ? (global.Function = x) : global.Function, value => new Proxy(value, {
+			[ 'Function', value => Object.assign(new Proxy(value, {
 				construct(target, args){
 					var ref = Reflect.construct(target, args);
 					
@@ -1137,36 +1116,37 @@ module.exports = class {
 					
 					return Reflect.apply(target, that, [ ...params, 'return(()=>' + rw.js(script , _pm_) + ')()' ])
 				},
+			}), {
+				bind: new Proxy(value.bind, {
+					apply: (target, that, args) => Reflect.apply(target, that, def.is_native(that) ? def.restore(...args) : args),
+				}),
+				apply: new Proxy(value.apply, {
+					apply: (target, that, [ tht, arg ]) => Reflect.apply(target, that, [ def.is_native(that) ? def.restore(tht)[0] : tht, arg && def.is_native(that) ? def.restore(...arg) : arg ]),
+				}),
+				call: new Proxy(value.call, {
+					apply: (target, that, [ tht, ...args ]) => Reflect.apply(target, that, [ def.is_native(that) ? def.restore(tht)[0] : tht, ...(args && def.is_native(that) ? def.restore(...args) : args) ]),
+				}),
 			}) ],
-			[ x => x ? (global.Function.prototype.bind = x) : global.Function.prototype.bind, value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, that, def.is_native(that) ? def.restore(...args) : args),
-			}) ],
-			[ x => x ? (global.Function.prototype.apply = x) : global.Function.prototype.apply, value => new Proxy(value, {
-				apply: (target, that, [ tht, arg ]) => Reflect.apply(target, that, [ def.is_native(that) ? def.restore(tht)[0] : tht, arg && def.is_native(that) ? def.restore(...arg) : arg ]),
-			}) ],
-			[ x => x ? (global.Function.prototype.call = x) : global.Function.prototype.call, value => new Proxy(value, {
-				apply: (target, that, [ tht, ...args ]) => Reflect.apply(target, that, [ def.is_native(that) ? def.restore(tht)[0] : tht, ...(args && def.is_native(that) ? def.restore(...args) : args) ]),
-			}) ],
-			[ x => x ? (global.fetch = x) : global.fetch, value => new Proxy(value, {
+			[ 'fetch', value => new Proxy(value, {
 				apply: (target, that, [ url, opts ]) => Reflect.apply(target, global, [ rw.url(url, { base: fills.url, origin: def.loc, route: false }), opts ]),
 			}) ],
-			[ x => x ? (global.Blob = x) : global.Blob, value => new Proxy(value, {
+			[ 'Blob', value => new Proxy(value, {
 				construct(target, [ data, opts ]){
 					var decoded = opts && rw.mime.js.includes(opts.type) && Array.isArray(data) ? [ rw.js(rw.decode_blob(data), { url: fills.url, origin: def.loc }) ] : data,
 						blob = Reflect.construct(target, [ decoded, opts ]);
 					
-					_pm_.blob_store.set(blob, decoded[0]);
+					_pm_.blob.set(blob, decoded[0]);
 					
 					return blob;
 				},
 			}) ],
-			[ x => x ? (global.Document.prototype.write = x) : global.Document.prototype.write, value => new Proxy(value, {
+			[ 'Document', 'prototype', 'write', value => new Proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, that, [ rw.html(args.join(''), def.rw_data({ snippet: true })) ]),
 			}) ],
-			[ x => x ? (global.Document.prototype.writeln = x) : global.Document.prototype.writeln, value => new Proxy(value, {
+			[ 'Document', 'prototype', 'writeln', value => new Proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, that, [ rw.html(args.join(''), def.rw_data({ snippet: true })) ]),
 			}) ],
-			[ x => x ? (global.WebSocket = x) : global.WebSocket, value => class extends value {
+			[ 'WebSocket', value => class extends value {
 				constructor(url, proto){
 					super(rw.url(url, def.rw_data({ ws: true })), proto);
 					
@@ -1175,106 +1155,127 @@ module.exports = class {
 					this.addEventListener('open', event => event.stopImmediatePropagation(), { once: true });
 				}
 			} ],
-			[ x => x ? (global.URL.createObjectURL = x) : global.URL.createObjectURL, value => new Proxy(value, {
+			[ 'URL', 'createObjectURL', value => new Proxy(value, {
 				apply(target, that, [ source ]){
 					var url = Reflect.apply(target, that, [ source ]);
 					
-					_pm_.url_store.set(url, _pm_.blob_store.get(source));
+					_pm_.urls.set(url, _pm_.blob.get(source));
 					
 					return url;
 				},
 			}) ],
-			[ x => x ? (global.URL.revokeObjectURL = x) : global.URL.revokeObjectURL, value => new Proxy(value, {
+			[ 'URL', 'revokeObjectURL', value => new Proxy(value, {
 				apply(target, that, [ url ]){
 					var ret = Reflect.apply(target, that, [ url ]);
 					
-					_pm_.url_store.delete(url);
+					_pm_.urls.delete(url);
 					
 					return ret;
 				},
 			}) ],
-			[ x => x ? (global.Object.defineProperty = x) : global.Object.defineProperty, value => new Proxy(value, def.defineprop_handler) ],
-			[ x => x ? (global.Reflect.defineProperty = x) : global.Reflect.defineProperty, value => new Proxy(value, def.defineprop_handler) ],
-			[ x => x ? (global.History.prototype.pushState = x) : global.History.prototype.pushState, value => new Proxy(value, {
+			[ 'Object', 'defineProperty', value => new Proxy(value, {
+				apply: (target, that, [ obj, prop, desc ]) => Reflect.apply(target, that, [ obj, prop, (obj && obj[_pm_.prox] && (desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true), desc) ]),
+			}) ],
+			[ 'Object', 'defineProperties', value => new Proxy(value, {
+				apply: (target, that, [ obj, descs ]) => Reflect.apply(target, that, [ obj, Object.fromEntries(Object.entries(descs).map(([ prop, desc ]) => [ prop, (obj && obj[_pm_.prox] && (desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true), desc) ])) ]),
+			}) ],
+			[ 'Reflect', 'defineProperty', value => new Proxy(value, {
+				apply: (target, that, [ obj, prop, desc ]) => Reflect.apply(target, that, [ obj, prop, (obj && obj[_pm_.prox] && (desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true), desc) ]),
+			}) ],
+			[ 'History', 'prototype', 'pushState', value => new Proxy(value, {
 				apply: (target, that, [ state, title, url ]) => Reflect.apply(target, that, [ state, title, rw.url(url, { origin: def.loc, base: fills.url }) ]),
 			}) ],
-			[ x => x ? (global.History.prototype.replaceState = x) : global.History.prototype.replaceState, value => new Proxy(value, {
+			[ 'History', 'prototype', 'replaceState', value => new Proxy(value, {
 				apply: (target, that, [ state, title, url ]) => Reflect.apply(target, that, [ state, title, rw.url(url, { origin: def.loc, base: fills.url }) ]),
 			}) ],
-			[ x => x ? (global.IDBFactory.prototype.open = x) : IDBFactory.prototype.open, value => new Proxy(value, {
-				apply: (target, that, [ name, version ]) => Reflect.apply(target, that, [ def.prefix.name(name), version ]),
-			}) ],
-			[ x => x ? (global.localStorage = x) : global.localStorage, value => (delete global.localStorage, new Proxy(value, def.storage_handler)) ],
-			[ x => x ? (global.sessionStorage = x) : global.sessionStorage, value => (delete global.sessionStorage, new Proxy(value, def.storage_handler)) ],
-			[ x => x ? (global.Storage.prototype.getItem = x) : global.Storage.prototype.getItem, value => new Proxy(value, {
+			[ 'IDBFactory', 'prototype', 'open', value => new Proxy(value, { apply: (target, that, [ name, version ]) => Reflect.apply(target, that, [ def.prefix.name(name), version ]) }) ],
+			[ 'localStorage', value => (delete global.localStorage, new Proxy(value, {
+				get: (target, prop, receiver, ret) => prop == _pm_.orig ? target : prop == _pm_.prox ? receiver : (typeof (ret = Reflect.get(target, prop)) == 'function' ? def.bind(ret, target) : target.getItem(prop)),
+				set: (target, prop, value) => (target.setItem(prop, value), true),
+			})) ],
+			[ 'sessionStorage', value => (delete global.sessionStorage, new Proxy(value, {
+				get: (target, prop, receiver, ret) => prop == _pm_.orig ? target : prop == _pm_.prox ? receiver : (typeof (ret = Reflect.get(target, prop)) == 'function' ? def.bind(ret, target) : target.getItem(prop)),
+				set: (target, prop, value) => (target.setItem(prop, value), true),
+			})) ],
+			[ 'Storage', 'prototype', 'getItem', value => new Proxy(value, {
 				apply: (target, that, [ prop ]) => Reflect.apply(target, that, [ def.prefix.name(prop) ]),
 			}) ],
-			[ x => x ? (global.Storage.prototype.setItem = x) : global.Storage.prototype.setItem, value => new Proxy(value, {
+			[ 'Storage', 'prototype', 'setItem', value => new Proxy(value, {
 				apply: (target, that, [ prop, value ]) => Reflect.apply(target, that, [ def.prefix.name(prop), value ]),
 			}) ],
-			[ x => x ? (global.Storage.prototype.removeItem = x) : global.Storage.prototype.removeItem, value => new Proxy(value, {
+			[ 'Storage', 'prototype', 'removeItem', value => new Proxy(value, {
 				apply: (target, that, [ prop, ]) => Reflect.apply(target, that, [ def.prefix.name(prop) ]),
 			}) ],
-			[ x => x ? (global.Storage.prototype.clear = x) : global.Storage.prototype.clear, value => new Proxy(value, {
+			[ 'Storage', 'prototype', 'clear', value => new Proxy(value, {
 				apply: (target, that) => Object.keys(that).forEach(val => def.prefix.origin(val) == fills.url.hostname && that.removeItem(prop))
 			}) ],
-			[ x => x ? (global.Storage.prototype.key = x) : global.Storage.prototype.key, value => new Proxy(value, {
+			[ 'Storage', 'prototype', 'key', value => new Proxy(value, {
 				apply: (target, that, [ key ]) => def.prefix.unname(Reflect.apply(target, that, [ key ])),
 			}) ],
-			[ x => x ? (global.importScripts = x) : global.importScripts, value => new Proxy(value, {
+			[ 'importScripts', value => new Proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, that, args.map(url => rw.url(url, def.rw_data({ type: 'js' })))),
 			}) ],
-			[ x => x ? (global.XMLHttpRequest.prototype.open  = x) : global.XMLHttpRequest.prototype.open, value => new Proxy(value, {
+			[ 'XMLHttpRequest', 'prototype', 'open', value => new Proxy(value, {
 				apply: (target, that, [ method, url, ...args ]) => Reflect.apply(target, that, [ method, rw.url(url, def.rw_data({ route: false })), ...args ]),
 			}) ],
-			[ x => x ? (global.Navigator.prototype.sendBeacon = x) : global.Navigator.prototype.sendBeacon, value => new Proxy(value, {
+			[ 'Navigator', 'prototype', 'sendBeacon', value => new Proxy(value, {
 				apply: (target, that, [ url, data ]) => Reflect.apply(target, that, [ rw.url(url, def.rw_data()), data ]),
 			}) ],
-			[ x => x ? (global.open = x) : global.open, value => new Proxy(value, {
+			[ 'open', value => new Proxy(value, {
 				apply: (target, that, [ url, name, features ]) => Reflect.apply(target, that, [ rw.url(url, def.rw_data()), name, features ]),
 			}) ],
-			[ x => x ? (global.Worker = x) : global.Worker, value => new Proxy(value, {
+			[ 'Worker', value => new Proxy(value, {
 				construct: (target, [ url, options ]) => Reflect.construct(target, [ rw.url(url, def.rw_data({  type: 'js' })), options ]),
 			}) ],
-			[ x => x ? (global.FontFace = x) : global.FontFace, value => new Proxy(value, {
+			[ 'FontFace', value => new Proxy(value, {
 				construct: (target, [ family, source, descriptors ]) => Reflect.construct(target, [ family, rw.url(source, def.rw_data({  type: 'font' })), descriptors ]),
 			}) ],
-			[ x => x ? (global.ServiceWorkerContainer.prototype.register = x) : global.ServiceWorkerContainer.prototype.register, value => new Proxy(value, {
+			[ 'ServiceWorkerContainer', 'prototype', 'register', value => new Proxy(value, {
 				apply: (target, that, [ url, options ]) => new Promise((resolve, reject) => reject(new Error('A Service Worker has been blocked for this domain'))),
 			}) ],
-			[ x => x ? (global.postMessage = x) : global.postMessage, value => new Proxy(value, {
+			[ 'postMessage', value => new Proxy(value, {
 				apply: (target, that, [ message, origin, transfer ]) => typeof global.WorkerNavigator == 'function' ? Reflect.apply(target, that, [ message, origin, transfer ]) : Reflect.apply(target, that, [ [ 'proxied', origin, message ], def.get_href().href, transfer ]),
 			}) ],
-			[ x => x ? (global.MouseEvent.prototype.initMouseEvent = x) : global.MouseEvent.prototype.initMouseEvent, value => new Proxy(value, {
+			[ 'MouseEvent', 'prototype', 'initMouseEvent', value => new Proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)),
 			}) ],
-			[ x => x ? (global.KeyboardEvent.prototype.initKeyboardEvent = x) : global.KeyboardEvent.prototype.initKeyboardEvent, value => new Proxy(value, {
+			[ 'KeyboardEvent', 'prototype', 'initKeyboardEvent', value => new Proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)),
 			}) ],
-			[ x => x ? (global.Document.prototype.querySelector = x) : global.Document.prototype.querySelector, value => new Proxy(value, {
+			[ 'Document', 'prototype', 'querySelector', value => new Proxy(value, {
 				apply: (target, that, [ query ]) => Reflect.apply(target, that, [ rw.css(query, def.rw_data()) ]),
 			}) ],
-			[ x => x ? (global.Document.prototype.querySelectorAll = x) : global.Document.prototype.querySelectorAll, value => new Proxy(value, {
+			[ 'Document', 'prototype', 'querySelectorAll', value => new Proxy(value, {
 				apply: (target, that, [ query ]) => Reflect.apply(target, that, [ rw.css(query, def.rw_data()) ]),
 			}) ],
-			[ x => x ? (global.getComputedStyle = x) : global.getComputedStyle, value => new Proxy(value, {
+			[ 'getComputedStyle', value => new Proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, that, args.map(def.restore).map(x => x instanceof global.Element ? x : def.doc.body)),
 			}) ],
-			[ x => x ? (Node.prototype.contains = x) : Node.prototype.contains, value => new Proxy(value, {
+			[ 'Node', 'prototype', 'contains', value => new Proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)),
 			}) ],
-			[ x => x ? (global.MutationObserver.prototype.observe = x) : global.MutationObserver.prototype.observe, value => new Proxy(value, {
+			[ 'MutationObserver', 'prototype', 'observe', value => new Proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)),
 			}) ],
 			/*
 			[ x => x ? (placeholder = x) : placeholder, value => placeholder ],
 			todo: cookieStore
 			*/
-		].forEach(([ orig, apply ]) => {
-			try{ var val = orig() }catch(err){ return; }
-			if(!val || val && ['object', 'function'].includes(typeof val) && val[_pm_.original])return;
-			var nval = orig(apply(val));
-			if(nval && ['object', 'function'].includes(typeof nval))nval[_pm_.original] = val;
+		].forEach(hooks => {
+			for(var callback = hooks.splice(-1)[0], depth = global, prev_depth, prev_hook, ind = 0; ind < hooks.length; ind++){
+				if(!depth[hooks[ind]])return;
+				
+				prev_depth = depth;
+				prev_hook = hooks[ind];
+				depth = depth[hooks[ind]];
+			}
+			
+			// !def.is_native(depth) || 
+			if(['object', 'function'].includes(typeof depth) && depth[_pm_.orig])return;
+			
+			depth[_pm_.orig] = depth;
+			
+			prev_depth[prev_hook] = Object.assign(callback(depth), { [_pm_.orig]: depth });
 		});
 		
 		return fills;

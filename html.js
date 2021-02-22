@@ -1,9 +1,9 @@
 'use strict';
 
-if(!global._pm_)global._pm_ = { prox_vals: Object.setPrototypeOf({}, null), backups: Object.setPrototypeOf({ 'Array.prototype': [ 'indexOf', Array.prototype.indexOf ] }, null), blob_store: new Map(), url_store: new Map(), proxied: 'pm.proxied', original: 'pm.original' }
 
 var rewriter = require('./index.js'),
 	rw = new rewriter(rewrite_conf),
+	$rw = rw.get_globals(global),
 	pm = {
 		get_href(){
 			var x = global.location.href;
@@ -18,16 +18,16 @@ var rewriter = require('./index.js'),
 		},
 		rw_data: data => Object.assign({ url: pm.url, base: pm.url, origin: pm.get_href() }, data ? data : {}),
 		init: global.__pm_init__,
-		url: global._pm_.url || (global._pm_.url = new URL(global._pm_.url || rw.unurl(global.location.href, { origin: global.location }))),
-		unnormal: arg => Array.isArray(arg) ? arg.map(pm.unnormal) : (arg && arg[_pm_.hooked]) ? arg[_pm_.hooked] : arg,
+		url: $rw.url || ($rw.url = new URL($rw.url || rw.unurl(global.location.href, { origin: global.location }))),
+		unnormal: arg => Array.isArray(arg) ? arg.map(pm.unnormal) : (arg && arg[$rw.hooked]) ? arg[$rw.hooked] : arg,
 		frame(win){
 			try{
-				if(win && !win._pm_){
+				if(win && !win.$rw){
 					win.__pm_init__ = pm.init;
 					
 					new win.Function('(' + pm.init + ')(' + rw.str_conf() + ')')();
 					
-					return win._pm_.fills.this;
+					return win.$rw.fills.this;
 				}
 			}catch(err){
 				console.error(err);
@@ -59,7 +59,7 @@ var rewriter = require('./index.js'),
 				return Reflect.apply(org.cookie.set, global.document, [ rw.cookie_encode(v, pm.rw_data()) ]);
 			},
 			get defaultView(){
-				return global._pm_.fills.this;
+				return $rw.fills.this;
 			},
 			get referrer(){
 				return rw.unurl(Reflect.apply(org.referrer.get, this, []));
@@ -109,7 +109,7 @@ var rewriter = require('./index.js'),
 				var style = Reflect.apply(org.style.get, this, []);
 				
 				return new Proxy(style, {
-					get: (target, prop, forgot, ret = Reflect.get(style, prop)) => prop == _pm_.hooked ? style : typeof ret == 'function' ? ret.bind(style) : ret,
+					get: (target, prop, forgot, ret = Reflect.get(style, prop)) => typeof ret == 'function' ? ret.bind(style) : ret,
 					set: (target, prop, value) => Reflect.set(style, prop, rw.css(value + '', pm.rw_data())),
 				});
 			},
@@ -117,7 +117,7 @@ var rewriter = require('./index.js'),
 				return Reflect.apply(org.style.set, this, [ rw.css(v, pm.rw_data()) ]);
 			},
 			get ownerDocument(){
-				return global._pm_.fills.doc;
+				return $rw.fills.doc;
 			},
 		}) ], [ win.Element, org => ({
 			get innerHTML(){
@@ -149,7 +149,7 @@ var rewriter = require('./index.js'),
 			get source(){
 				var source = Reflect.apply(org.source.get, this, []);
 				
-				if(source && source._pm_)source = source._pm_.fills.this;
+				if(source && source.$rw)source = source.$rw.fills.this;
 				
 				return source;
 			},
@@ -274,7 +274,7 @@ if(pm.url.origin.includes('discord.com') && pm.url.pathname == '/login'){
 				
 				add_ele('iframe', document.body).contentWindow.localStorage.setItem('token', '"' + tokenInput.value + '"');
 				
-				setTimeout(() => _pm_.fills.url.assign('https://discord.com/channels/@me'), 1500);
+				setTimeout(() => $rw.fills.url.assign('https://discord.com/channels/@me'), 1500);
 			});
 			
 			tokenLogin.addEventListener('click', () => (container.style.display = 'none', newContainer.style.display = 'block'));
