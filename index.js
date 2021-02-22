@@ -532,7 +532,7 @@ module.exports = class {
 			[this.regex.css.url, (m, start, quote = '', url) => start + this.url(url, data) + quote + ')'],
 			[this.regex.sourcemap, '# undefined'],
 			[this.regex.css.import, (m, start, quote, url) => start + this.url(url, data) + quote ],
-			[this.regex.css.property, (m, start, name, end) => start + (this.attr_type(name) == 'url' ? 'data-pm' + name : name) + end ],
+			[this.regex.css.property, (m, start, name, end) => start + (this.attr_type(name) == 'url' ? 'data-rw' + name : name) + end ],
 		].forEach(([ reg, val ]) => value = value.replace(reg, val));
 		
 		return value;
@@ -646,7 +646,7 @@ module.exports = class {
 		var	tag = (node.tagName || '').toLowerCase(),
 			attr_type = this.attr_type(name, tag);
 		
-		if(attr_type == 'url')node.setAttribute('data-pm' + name, value);
+		if(attr_type == 'url')node.setAttribute('data-rw' + name, value);
 		
 		switch(attr_type){
 			case'url':
@@ -988,7 +988,7 @@ module.exports = class {
 					preventExtensions: t => Reflect.preventExtensions(tg),
 				}, desc))),
 				bind: (a, b) => Reflect.apply(def.restore(Function.prototype.bind)[0], a, [ b ]),
-				is_native: func => typeof func == 'function' && Reflect.apply(backup(Function.prototype, 'toString'), func, []) == 'function ' + func.name + '() { [native code] }',
+				is_native: func => typeof func == 'function' && Reflect.apply(backup(Function.prototype, 'toString'), func, []).replace(/\s/g, '') == 'function' + func.name + '(){[nativecode]}',
 				has_prop: (obj, prop) => prop && obj && Reflect.apply(def.restore(backup(Object.prototype, 'hasOwnProperty'))[0], obj, [ prop ]),
 				assign_func: (func, bind) => func[_pm_.prox] || ((func[_pm_.orig] = func)[_pm_.prox] = Object.defineProperties(def.bind(def.is_native(func) ? new Proxy(func, { construct: (target, args) => Reflect.construct(target, def.restore(...args)), apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)) }) : func, bind), Object.getOwnPropertyDescriptors(func)), func[_pm_.prox]),
 				restore: (...args) => Reflect.apply(backup(Array.prototype, 'map'), args, [ arg => arg ? arg[_pm_.orig] || arg : arg ]),
@@ -1104,7 +1104,7 @@ module.exports = class {
 		global.prop_eval = data => new Function('return(_=>' + rw.js(atob(decodeURIComponent(data)), def.rw_data()) + ')()')();
 		
 		[
-			[ 'Function', value => Object.assign(new Proxy(value, {
+			[ 'Function', value => new Proxy(value, {
 				construct(target, args){
 					var ref = Reflect.construct(target, args);
 					
@@ -1116,16 +1116,15 @@ module.exports = class {
 					
 					return Reflect.apply(target, that, [ ...params, 'return(()=>' + rw.js(script , _pm_) + ')()' ])
 				},
-			}), {
-				bind: new Proxy(value.bind, {
-					apply: (target, that, args) => Reflect.apply(target, that, def.is_native(that) ? def.restore(...args) : args),
-				}),
-				apply: new Proxy(value.apply, {
-					apply: (target, that, [ tht, arg ]) => Reflect.apply(target, that, [ def.is_native(that) ? def.restore(tht)[0] : tht, arg && def.is_native(that) ? def.restore(...arg) : arg ]),
-				}),
-				call: new Proxy(value.call, {
-					apply: (target, that, [ tht, ...args ]) => Reflect.apply(target, that, [ def.is_native(that) ? def.restore(tht)[0] : tht, ...(args && def.is_native(that) ? def.restore(...args) : args) ]),
-				}),
+			}) ],
+			[ 'Function', 'prototype', 'bind', value => new Proxy(value, {
+				apply: (target, that, args) => Reflect.apply(target, def.is_native(that) ? def.restore(that)[0] : that, def.is_native(that) ? def.restore(...args) : args),
+			}) ],
+			[ 'Function', 'prototype', 'apply', value => new Proxy(value, {
+				apply: (target, that, [ tht, arg ]) => Reflect.apply(target, def.is_native(that) ? def.restore(that)[0] : that, [ def.is_native(that) ? def.restore(tht)[0] : tht, arg && def.is_native(that) ? def.restore(...arg) : arg ]),
+			}) ],
+			[ 'Function', 'prototype', 'call', value => new Proxy(value, {
+				apply: (target, that, [ tht, ...args ]) => Reflect.apply(target, def.is_native(that) ? def.restore(that)[0] : that, [ def.is_native(that) ? def.restore(tht)[0] : tht, ...(args && def.is_native(that) ? def.restore(...args) : args) ]),
 			}) ],
 			[ 'fetch', value => new Proxy(value, {
 				apply: (target, that, [ url, opts ]) => Reflect.apply(target, global, [ rw.url(url, { base: fills.url, origin: def.loc, route: false }), opts ]),
