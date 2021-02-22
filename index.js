@@ -948,7 +948,7 @@ module.exports = class {
 	globals(url, rw){
 		var global = new (_=>_).constructor('return this')(),
 			URL = rw.URL,
-			_pm_ = global._pm_ || (global._pm_ = { prox_vals: Object.setPrototypeOf({}, null), backups: Object.setPrototypeOf({}, null), blob_store: new Map(), url_store: new Map(), url: new URL(url), proxied: 'pm.proxied', original: 'pm.original' }),
+			_pm_ = global._pm_ || (global._pm_ = { prox_vals: Object.setPrototypeOf({ 'Array.prototype': [ 'indexOf', Array.prototype.indexOf ] }, null), backups: Object.setPrototypeOf({}, null), blob_store: new Map(), url_store: new Map(), url: new URL(url), proxied: 'pm.proxied', original: 'pm.original' }),
 			Reflect = Object.fromEntries(Object.getOwnPropertyNames(global.Reflect).map(key => [ key, global.Reflect[key] ])),
 			pdef = {
 				// stateless map
@@ -956,7 +956,7 @@ module.exports = class {
 					var array = typeof object == 'object' ? object[key] : null;
 					if(!array)return;
 					
-					var index = Reflect.apply(def.$backup(Array.prototype, 'indexOf'), array, [ key ]);
+					var index = Reflect.apply(_pm_.backups['Array.prototype'][1], array, [ key ]);
 					
 					if((index % 2) == 0 && index != -1)return array[index + 1];
 				},
@@ -966,9 +966,9 @@ module.exports = class {
 					var array = typeof object == 'object' ? (object[key1] || (object[key1] = [])) : null;
 					if(!array)return;
 					
-					var index = Reflect.apply(def.$backup(Array.prototype, 'indexOf'), array, [ key ]);
+					var index = Reflect.apply(_pm_.backups['Array.prototype'][1], array, [ key ]);
 					
-					if((index % 2) == 0 && index != -1)Reflect.apply(def.$backup(Array.prototype, 'indexOf'), array, [ index, 2 ]);
+					if((index % 2) == 0 && index != -1)Reflect.apply(_pm_.backups['Array.prototype'][1], array, [ index, 2 ]);
 					
 					array.push(key, value);
 					
