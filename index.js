@@ -949,7 +949,7 @@ module.exports = class {
 		var global = new (_=>_).constructor('return this')(),
 			URL = rw.URL,
 			_proxy = Proxy, // function(target, desc){if(typeof target == 'function')return Object.defineProperties(function(...args){return new.target?desc.construct?desc.construct(target,args):new target(...args):desc.apply?desc.apply(target,this,args):target(...args)},Object.getOwnPropertyDescriptors(target));var n=[],i = o =>{var proto = Object.getPrototypeOf(o);if(typeof o!='object'||!proto)return o;n.push(...Object.getOwnPropertyNames(o));i(proto);return o};i(target);return Object.defineProperties({},Object.fromEntries(n.map(p=>[p,{get:_=>desc.ge?desc.get(target,p):Reflect.get(target,p),set:v=>desc.set?desc.set(target,p,v):Reflect.set(target,p,v)}])))},
-			_pm_ = global._pm_ || (global._pm_ = { proxied: [], backups: [], blob_store: new Map(), url_store: new Map(), url: new URL(url), proxied: 'pm.proxied', original: 'pm.original' }),
+			_pm_ = global._pm_ || (global._pm_ = { proxied: {}, backups: [], blob_store: new Map(), url_store: new Map(), url: new URL(url), proxied: 'pm.proxied', original: 'pm.original' }),
 			Reflect = Object.fromEntries(Object.getOwnPropertyNames(global.Reflect).map(key => [ key, global.Reflect[key] ])),
 			def = {
 				rw_data: data => Object.assign({ url: fills.url, base: fills.url, origin: def.loc }, data ? data : {}),
@@ -1066,13 +1066,15 @@ module.exports = class {
 					},
 				},
 				// stateless map
-				mget(array, key, key1){
-					var index = array.findIndex(entry => entry[0] == key && entry[1] == key1);
+				mget(array, key,){
+					if(!array)return;
 					
-					if(index != -1)return array[index][2];
+					var index = array.findIndex(entry => entry[0] == key);
+					
+					if(index != -1)return array[index][1];
 				},
-				mset(array, key, key1, value){
-					array.push([ key, key1, value ]);
+				mset(array, key, value){
+					array.push([ key, value ]);
 					
 					return value;
 				},
@@ -1121,10 +1123,10 @@ module.exports = class {
 		
 		[ _pm_.original, _pm_.proxied ].forEach(prop => !def.has_prop(global.Object.prototype, prop) && Object.defineProperty(global.Object.prototype, prop, {
 			get(){
-				return def.mget(_pm_.backups, prop, this);
+				return def.mget(_pm_.backups['_' + prop], this);
 			},
 			set(value){
-				return def.mset(_pm_.backups, prop, this, value);
+				return def.mset(_pm_.backups['_' + prop] || (_pm_.backups['_' + prop] = []), this, value);
 			},
 		}));
 		
