@@ -9,27 +9,81 @@ var fs = require('fs'),
 	ws = require('./ws.js'),
 	jsdom = require('./jsdom.js').JSDOM,
 	terser = require('./terser.js'),
-	adblock = require('./adblock.js'),
-	filter_data = {},
-	adblock_match = input => filter_data.filters.find(filter => {
-		// adblock.matchesFilter(filter, input);
-		if(filter.isRegex)return (filter.regex || (filter.regex = new RegExp(filter.data))).test(input.href);
+	adblock = { filters: [], exceptions: [] },
+	test_filter = (url, type, dat) => {
+		// validation
 		
-		if(filter.leftAnchored && filter.rightAnchored)return filter.data == input.href;
+		if(dat[2].script && type != 'js')return false;
+		if(dat[2].document && type != 'html')return false;
+		if(dat[2].subdocument && type != 'html')return false;
 		
-		if(filter.rightAnchored)return input.href.slice(-filter.data.length) == filter.data;
+		if(dat[2].domain){
+			var domains = dat[2].domain.split('|');
+			
+			for(var host, ind = 0; ind < domains.length; ind++){
+				host = domains[ind];
+				
+				if(host.startsWith('~') && url.host != host.substr(1))return false;
+			}
+		}
 		
-		if(filter.leftAnchored)return input.href.substring(0, filter.data.length) == filter.data;
+		// regexing
+		// check against url without protocol
 		
-		var parts = filter.data.split('*'),
-			index = 0;
+		var match = url.href.substr(url.href.indexOf(url.hostname)).match(dat[1]);
 		
-		if(filter.data.match(/^[0-9a-z]/i) && input.hostname.endsWith(filter.data.split(' ').splice(-1)[0]))return true;
-		
-		return false;
-	});
+		return match || false;
+	};
 
-adblock.parse(fs.readFileSync(path.join(__dirname, 'adblock.txt'), 'utf8'), filter_data);
+fs.readFileSync(path.join(__dirname, 'easylist.txt'), 'utf8').split('\n').forEach(line => {
+	var str = line,
+		com_ind = line.indexOf('! ');
+	
+	if(com_ind != -1)str = str.slice(0, com_ind);
+	
+	var opt_ind = str.lastIndexOf('$'),
+		options = opt_ind == -1 ? {} : Object.fromEntries(str.substr(opt_ind + 1).split(',').map(val => val.split('=')));
+	
+	if(opt_ind != -1)str = str.slice(0, opt_ind);
+	
+	var css_ind = str.indexOf('##');
+	
+	if(css_ind != -1)return; // str = str.slice(0, css_ind);
+	
+	var dir_ind = str.indexOf('||');
+	
+	if(dir_ind != -1)str = str.slice(dir_ind + 2);
+	
+	// exception
+	
+	var exp = str.startsWith('@@');
+	
+	if(exp)str = str.slice(2);
+	
+	if(!str || str.startsWith('[') || !str.length)return;
+	
+	/*
+	[0] string
+	[1] regex
+	[2] options
+	[3] exception
+	*/
+	
+	var regex = str.startsWith('/') && str.endsWith('/') ? new RegExp(str.slice(1, -1)) : new RegExp(str.replace(/[\[\]?$()\/\\|.+]/g, char => '\\' + char).replace(/\*/g, '.*?').replace(/\^/g, '([^a-zA-Z0-9_\\-.%]|^|$)'));
+	
+	adblock[exp != -1 ? 'exceptions' : 'filters'].push([ str, regex, options, line ]);
+});
+
+var adblock_match = (url, type) => {
+	for(var exp_ind = 0, ind = 0; ind < adblock.filters.length; ind++){
+		if(test_filter(url, type, adblock.filters[ind])){
+			// match against exceptions
+			for(exp_ind = 0; exp_ind < adblock.exceptions.length; exp_ind++)if(test_filter(url, type, adblock.exceptions[exp_ind]))return;
+			
+			return adblock.filters[ind];
+		}
+	}
+}
 
 /*end_server*/
 
@@ -73,7 +127,12 @@ module.exports = class {
 		
 		this.URL = class extends URL {
 			get fullpath(){
-				return this.href.substr(this.origin.length);
+				var path = this.href.substr(this.origin.length),
+					hash = path.indexOf('#');
+				
+				if(hash != -1)path = path.slice(0, hash);
+				
+				return path;
 			}
 		};
 		
@@ -95,12 +154,6 @@ module.exports = class {
 					timeout = setTimeout(() => !res.resp.sent_body && (failure = true, res.cgi_status(500, 'Timeout')), this.config.timeout);
 				
 				if(!url || !this.http_protocols.includes(url.protocol))return res.redirect('/');
-				
-				if(this.config.adblock){
-					var matched = adblock_match(url);
-					
-					if(matched)return res.cgi_status(401, JSON.stringify(matched), 'Adblock active');
-				}
 				
 				dns.lookup(url.hostname, (err, ip) => {
 					if(err)return res.cgi_status(400, err);
@@ -124,6 +177,12 @@ module.exports = class {
 								content_type = (resp.headers['content-type'] || '').split(';')[0],
 								type =  content_type == 'text/plain' ? 'plain' : dest == 'font' ? 'font' : decoded.has('type') ? decoded.get('type') : dest == 'script' ? 'js' : (this.mime_ent.find(([ key, val ]) => val.includes(content_type)) || [])[0],
 								dec_headers = this.headers_decode(resp.headers, data);
+										
+							if(this.config.adblock){
+								var matched = adblock_match(url, type);
+								
+								if(matched)return res.cgi_status(401, '<pre>EasyList has prevented the following page from loading:\n' + res.sanitize(url.href) + '\n\nBecause of the following filter:\n' + JSON.stringify(matched) + '</pre>');
+							}
 							
 							res.status(resp.statusCode.toString().startsWith('50') ? 400 : resp.statusCode);
 							
@@ -451,7 +510,7 @@ module.exports = class {
 		
 		var id = this.checksum(value);
 		
-		if(data.scope !== false)value = js_imports.join('\n') + '{/*pmrw' + id + '*/let fills=' + (data.global == true ? '_pm_.fills' : `(${this.glm})(${this.wrap(data.url + '')},new((()=>{${this.prw}})())(${this.str_conf()}))`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';' + value.replace(this.regex.js.prw_ins, (match, ind) => prws[ind]) + '\n' + (value.match(this.regex.js.sourceurl) ? '' : '//# sourceURL=' + encodeURI((this.valid_url(data.url) + '').replace(this.regex.js.comment, '/' + String.fromCharCode(8203) + '/') || 'RWVM' + id) + '\n') + '/*pmrw' + id + '*/}';
+		if(data.scope !== false)value = js_imports.join('\n') + '{/*pmrw' + id + '*/let fills=' + (data.global == true ? '_pm_.fills' : `(${this.glm})(${this.wrap(data.url + '')},new((()=>{${this.prw}})())(${this.str_conf()}))`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';' + value.replace(this.regex.js.prw_ins, (match, ind) => prws[ind]) + '\n' + (value.match(this.regex.js.sourceurl) ? '' : '//# sourceURL=' + encodeURI((this.valid_url(data.url) + '').replace(this.regex.js.comment, '::') || 'RWVM' + id) + '\n') + '/*pmrw' + id + '*/}';
 		
 		return value;
 	}
@@ -889,8 +948,8 @@ module.exports = class {
 	globals(url, rw){
 		var global = new (_=>_).constructor('return this')(),
 			URL = rw.URL,
-			_proxy = function(target, desc){if(typeof target == 'function')return Object.defineProperties(function(...args){return new.target?desc.construct?desc.construct(target,args):new target(...args):desc.apply?desc.apply(target,this,args):target(...args)},Object.getOwnPropertyDescriptors(target));var n=[],i = o =>{var proto = Object.getPrototypeOf(o);if(typeof o!='object'||!proto)return o;n.push(...Object.getOwnPropertyNames(o));i(proto);return o};i(target);return Object.defineProperties({},Object.fromEntries(n.map(p=>[p,{get:_=>desc.ge?desc.get(target,p):Reflect.get(target,p),set:v=>desc.set?desc.set(target,p,v):Reflect.set(target,p,v)}])))},
-			_pm_ = global._pm_ || (global._pm_ = { backups: [], blob_store: new Map(), url_store: new Map(), url: new URL(url), proxied: 'pm.proxied', original: 'pm.original' }),
+			_proxy = Proxy, // function(target, desc){if(typeof target == 'function')return Object.defineProperties(function(...args){return new.target?desc.construct?desc.construct(target,args):new target(...args):desc.apply?desc.apply(target,this,args):target(...args)},Object.getOwnPropertyDescriptors(target));var n=[],i = o =>{var proto = Object.getPrototypeOf(o);if(typeof o!='object'||!proto)return o;n.push(...Object.getOwnPropertyNames(o));i(proto);return o};i(target);return Object.defineProperties({},Object.fromEntries(n.map(p=>[p,{get:_=>desc.ge?desc.get(target,p):Reflect.get(target,p),set:v=>desc.set?desc.set(target,p,v):Reflect.set(target,p,v)}])))},
+			_pm_ = global._pm_ || (global._pm_ = { proxied: [], backups: [], blob_store: new Map(), url_store: new Map(), url: new URL(url), proxied: 'pm.proxied', original: 'pm.original' }),
 			Reflect = Object.fromEntries(Object.getOwnPropertyNames(global.Reflect).map(key => [ key, global.Reflect[key] ])),
 			def = {
 				rw_data: data => Object.assign({ url: fills.url, base: fills.url, origin: def.loc }, data ? data : {}),
@@ -920,10 +979,9 @@ module.exports = class {
 				},
 				proxied: [],
 				$backup: (obj, prop, val) => ((val = _pm_.backups.findIndex(x => x[0] == obj && x[1] == prop), val != -1 && _pm_.backups[val][2]) || (val = obj[prop]) && val && val[_pm_.original] || (_pm_.backups.push([ obj, prop, obj[prop] ]))),
-				$prop: (obj, prop, orig) => (Object.defineProperty(obj, prop, { value: orig, enumerable: false, writable: true }), orig),
-				has_prop: (obj, prop) => prop && obj && Reflect.apply(def.restore(Object.prototype.hasOwnProperty)[0], obj, [ prop ]),
+				has_prop: (obj, prop) => prop && obj && Reflect.apply(def.restore(def.$backup(Object.prototype, 'hasOwnProperty'))[0], obj, [ prop ]),
 				alt_prop: (obj, prop) => def.has_prop(obj, prop) ? obj[prop] : null,
-				assign_func: (func, bind) => func[_pm_.proxied] || def.$prop(def.$prop(func, _pm_.original, func), _pm_.proxied, Object.defineProperties(def.bind(def.is_native(func) ? new _proxy(func, { construct: (target, args) => Reflect.construct(target, def.restore(...args)), apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)) }) : func, bind), Object.getOwnPropertyDescriptors(func))),
+				assign_func: (func, bind) => func[_pm_.proxied] || ((func[_pm_.original] = func)[_pm_.proxied] = Object.defineProperties(def.bind(def.is_native(func) ? new _proxy(func, { construct: (target, args) => Reflect.construct(target, def.restore(...args)), apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)) }) : func, bind), Object.getOwnPropertyDescriptors(func)), func[_pm_.proxied]),
 				proxy_targets: {
 					/* blank class to remove all native object methods */
 					win: Object.setPrototypeOf({}, null),
@@ -1007,6 +1065,17 @@ module.exports = class {
 						return fills.url.hostname;
 					},
 				},
+				// stateless map
+				mget(array, key, key1){
+					var index = array.findIndex(entry => entry[0] == key && entry[1] == key1);
+					
+					if(index != -1)return array[index][2];
+				},
+				mset(array, key, key1, value){
+					array.push([ key, key1, value ]);
+					
+					return value;
+				},
 			};
 		
 		// backup CRITICAL props
@@ -1050,8 +1119,17 @@ module.exports = class {
 			})) : undefined,
 		};
 		
-		def.$prop(global, _pm_.proxied, fills.this);
-		if(def.doc)def.$prop(def.doc, _pm_.proxied, fills.doc);
+		[ _pm_.original, _pm_.proxied ].forEach(prop => !def.has_prop(global.Object.prototype, prop) && Object.defineProperty(global.Object.prototype, prop, {
+			get(){
+				return def.mget(_pm_.backups, prop, this);
+			},
+			set(value){
+				return def.mset(_pm_.backups, prop, this, value);
+			},
+		}));
+		
+		global[_pm_.proxied] = fills.this;
+		if(def.doc)def.doc[_pm_.proxied] = fills.doc;
 		
 		global.rw_this = that => def.proxify(that)[0];
 		// get scope => eval inside of scope
@@ -1076,10 +1154,10 @@ module.exports = class {
 				apply: (target, that, args) => Reflect.apply(target, that, def.is_native(that) ? def.restore(...args) : args),
 			}) ],
 			[ x => x ? (global.Function.prototype.apply = x) : global.Function.prototype.apply, value => new _proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, that, def.is_native(that) ? def.restore(...args) : args),
+				apply: (target, that, [ tht, arg ]) => Reflect.apply(target, that, [ def.is_native(that) ? def.restore(tht)[0] : tht, arg && def.is_native(that) ? def.restore(...arg) : arg ]),
 			}) ],
 			[ x => x ? (global.Function.prototype.call = x) : global.Function.prototype.call, value => new _proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, that || {}, def.is_native(that) ? def.restore(...args) : args),
+				apply: (target, that, [ tht, ...args ]) => Reflect.apply(target, that, [ def.is_native(that) ? def.restore(tht)[0] : tht, ...(args && def.is_native(that) ? def.restore(...args) : args) ]),
 			}) ],
 			[ x => x ? (global.fetch = x) : global.fetch, value => new _proxy(value, {
 				apply: (target, that, [ url, opts ]) => Reflect.apply(target, global, [ rw.url(url, { base: fills.url, origin: def.loc, route: false }), opts ]),
@@ -1197,6 +1275,9 @@ module.exports = class {
 			[ x => x ? (Node.prototype.contains = x) : Node.prototype.contains, value => new _proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)),
 			}) ],
+			[ x => x ? (global.MutationObserver.prototype.observe = x) : global.MutationObserver.prototype.observe, value => new _proxy(value, {
+				apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)),
+			}) ],
 			/*
 			[ x => x ? (placeholder = x) : placeholder, value => placeholder ],
 			todo: cookieStore
@@ -1205,7 +1286,7 @@ module.exports = class {
 			try{ var val = orig() }catch(err){ return; }
 			if(!val || val && ['object', 'function'].includes(typeof val) && val[_pm_.original])return;
 			var nval = orig(apply(val));
-			if(nval && ['object', 'function'].includes(typeof nval))def.$prop(nval, _pm_.original, val);
+			if(nval && ['object', 'function'].includes(typeof nval))nval[_pm_.original] = val;
 		});
 		
 		return fills;

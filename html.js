@@ -1,6 +1,6 @@
 'use strict';
 
-if(!global._pm_)global._pm_ = { backups: [], blob_store: new Map(), url_store: new Map(), proxied: 'pm.proxied', overwrite: 'pm.overwrite', original: 'pm.original' };
+if(!global._pm_)global._pm_ = { proxied: [], backups: [], blob_store: new Map(), url_store: new Map(), proxied: 'pm.proxied', overwrite: 'pm.overwrite', original: 'pm.original' };
 
 var rewriter = require('./index.js'),
 	rw = new rewriter(rewrite_conf),
