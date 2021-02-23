@@ -158,7 +158,7 @@ module.exports = class {
 				dns.lookup(url.hostname, (err, ip) => {
 					if(err)return res.cgi_status(400, err);
 					
-					if(ip.match(this.regex.url.ip))return console.log(url.href) + res.cgi_status(403, 'Forbidden IP');
+					if(ip.match(this.regex.url.ip))return res.cgi_status(403, 'Forbidden IP');
 					
 					try{
 						(url.protocol == 'http:' ? http : https).request({
@@ -988,7 +988,7 @@ module.exports = class {
 					preventExtensions: t => Reflect.preventExtensions(tg),
 				}, desc))),
 				bind: (a, b) => Reflect.apply(def.restore(Function.prototype.bind)[0], a, [ b ]),
-				is_native: func => typeof func == 'function' && Reflect.apply(backup(Function.prototype, 'toString'), func, []).replace('\n   ', '').replace('\n}', ' }') == 'function ' + func.name + '() { [nativecode] }',
+				is_native: func => typeof func == 'function' && Reflect.apply(backup(Function.prototype, 'toString'), func, []).replace('\n   ', '').replace('\n}', ' }') == 'function ' + func.name + '() { [native code] }',
 				has_prop: (obj, prop) => prop && obj && Reflect.apply(def.restore(backup(Object.prototype, 'hasOwnProperty'))[0], obj, [ prop ]),
 				assign_func: (func, bind) => func[_pm_.prox] || ((func[_pm_.orig] = func)[_pm_.prox] = Object.defineProperties(def.bind(def.is_native(func) ? new Proxy(func, { construct: (target, args, newt) => Reflect.construct(target, def.restore(...args), newt), apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)) }) : func, bind), Object.getOwnPropertyDescriptors(func)), func[_pm_.prox]),
 				restore: (...args) => Reflect.apply(backup(Array.prototype, 'map'), args, [ arg => arg ? arg[_pm_.orig] || arg : arg ]),
@@ -1248,6 +1248,9 @@ module.exports = class {
 			}) ],
 			[ 'getComputedStyle', value => new Proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, that, args.map(def.restore).map(x => x instanceof global.Element ? x : def.doc.body)),
+			}) ],
+			[ 'Document', 'prototype', 'createTreeWalker', value => new Proxy(value, {
+				apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)),
 			}) ],
 			[ 'Node', 'prototype', 'contains', value => new Proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)),

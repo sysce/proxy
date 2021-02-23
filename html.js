@@ -30,7 +30,7 @@ var rewriter = require('./index.js'),
 					return win.$rw.fills.this;
 				}
 			}catch(err){
-				console.error(err);
+				console.error(win, err);
 				return { fills: { this: {} } };
 			}
 		},
