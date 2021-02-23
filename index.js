@@ -431,7 +431,7 @@ module.exports = class {
 		if(value.startsWith('blob:') && data.type == 'js' && module.browser){
 			var raw = global.$rw.urls.get(value);
 			
-			if(raw)return (URL.createObjectURL[_pm_.orig] || URL.createObjectURL)(new Blob([ this.js(raw, { url: data.base, origin: data.origin }) ]));
+			if(raw)return (URL.createObjectURL[$rw.orig] || URL.createObjectURL)(new Blob([ this.js(raw, { url: data.base, origin: data.origin }) ]));
 		}
 		
 		if(value.match(this.regex.url.proto) && !this.protocols.some(proto => value.startsWith(proto)))return value;
@@ -670,7 +670,7 @@ module.exports = class {
 				break;
 		}
 		
-		node.setAttribute(name, value);
+		try{ node.setAttribute(name, value) }catch(err){ node[name] = value };
 	}
 	/**
 	* Soon to add removing the servers IP, mainly for converting values to strings when handling
@@ -970,7 +970,7 @@ module.exports = class {
 			URL = rw.URL,
 			_pm_ = rw.get_globals(global),
 			Reflect = Object.fromEntries(Object.getOwnPropertyNames(global.Reflect).map(key => [ key, global.Reflect[key] ])),
-			backup = (obj, key, sub) => (sub = _pm_.backups.has(obj) ? _pm_.backups.get(obj) : _pm_.backups.set(obj, {}), sub[key] || (sub[key] = obj[key])),
+			backup = (obj, key, sub) => (sub = _pm_.backups.has(obj) ? _pm_.backups.get(obj) : _pm_.backups.set(obj, Object.setPrototypeOf({}, null)), sub[key] || (sub[key] = obj[key])),
 			Proxy = backup(global, 'Proxy'),
 			def = {
 				rw_data: data => Object.assign({ url: fills.url, base: fills.url, origin: def.loc }, data ? data : {}),
@@ -988,9 +988,9 @@ module.exports = class {
 					preventExtensions: t => Reflect.preventExtensions(tg),
 				}, desc))),
 				bind: (a, b) => Reflect.apply(def.restore(Function.prototype.bind)[0], a, [ b ]),
-				is_native: func => typeof func == 'function' && Reflect.apply(backup(Function.prototype, 'toString'), func, []).replace(/\s/g, '') == 'function' + func.name + '(){[nativecode]}',
+				is_native: func => typeof func == 'function' && Reflect.apply(backup(Function.prototype, 'toString'), func, []).replace('\n   ', '').replace('\n}', ' }') == 'function ' + func.name + '() { [nativecode] }',
 				has_prop: (obj, prop) => prop && obj && Reflect.apply(def.restore(backup(Object.prototype, 'hasOwnProperty'))[0], obj, [ prop ]),
-				assign_func: (func, bind) => func[_pm_.prox] || ((func[_pm_.orig] = func)[_pm_.prox] = Object.defineProperties(def.bind(def.is_native(func) ? new Proxy(func, { construct: (target, args) => Reflect.construct(target, def.restore(...args)), apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)) }) : func, bind), Object.getOwnPropertyDescriptors(func)), func[_pm_.prox]),
+				assign_func: (func, bind) => func[_pm_.prox] || ((func[_pm_.orig] = func)[_pm_.prox] = Object.defineProperties(def.bind(def.is_native(func) ? new Proxy(func, { construct: (target, args, newt) => Reflect.construct(target, def.restore(...args), newt), apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)) }) : func, bind), Object.getOwnPropertyDescriptors(func)), func[_pm_.prox]),
 				restore: (...args) => Reflect.apply(backup(Array.prototype, 'map'), args, [ arg => arg ? arg[_pm_.orig] || arg : arg ]),
 				proxify: (...args) => Reflect.apply(backup(Array.prototype, 'map'), args, [ arg => arg ? arg[_pm_.prox] || arg : arg ]),
 				prefix: {
@@ -1040,7 +1040,6 @@ module.exports = class {
 		backup(Function.prototype, 'toString');
 		backup(Function.prototype, 'bind');
 		backup(Object.prototype, 'hasOwnProperty');
-		backup(Array.prototype, 'indexOf');
 		backup(Array.prototype, 'splice');
 		backup(Array.prototype, 'map');
 		
