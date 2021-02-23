@@ -828,7 +828,7 @@ module.exports = class {
 			if(split[0] == 'secure')return '';
 			else if(split[0] == 'domain')split[1] = data.origin.hostname;
 			else if(split[0] == 'path')split[1] = '/';
-			else if(!['expires', 'path', 'httponly', 'samesite'].includes(split[0]))split[0] += '@' + this.valid_url(data.url).hostname;
+			else if(!['expires', 'path', 'httponly', 'samesite', 'max-age'].includes(split[0].toLowerCase()))split[0] += '@' + this.valid_url(data.url).hostname;
 			
 			
 			return split[0] + (split[1] ? '=' + split[1] + ';' : ';');
