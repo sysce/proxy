@@ -9,29 +9,6 @@ var fs = require('fs'),
 	WebSocket = require('./ws.js'),
 	jsdom = require('./jsdom.js').JSDOM,
 	terser = require('./terser.js'),
-	adblock = { filters: [], exceptions: [] },
-	test_filter = (url, type, dat) => {
-		// validation
-		
-		if(dat[2].script && type != 'js')return false;
-		if(dat[2].document && type != 'html')return false;
-		if(dat[2].subdocument && type != 'html')return false;
-		
-		if(dat[2].domain){
-			var domains = dat[2].domain.split('|'),
-				applies = domains.filter(x => !x.startsWith('~')),
-				excepts = domains.filter(x => x.startsWith('~'));
-			
-			if(!domains.includes(url.host) || excepts.includes(url.host))return;
-		}
-		
-		// regexing
-		// check against url without protocol
-		
-		var match = url.href.substr(url.href.indexOf(url.hostname)).match(dat[1]);
-		
-		return match || false;
-	},
 	bundler = class {
 		constructor(modules, wrapper = [ '', '' ]){
 			this.modules = modules;
@@ -54,57 +31,92 @@ var fs = require('fs'),
 		run(){
 			return new Promise((resolve, reject) => Promise.all(this.modules.map(data => new Promise((resolve, reject) => this.resolve_contents(data).then((text, str = (data.endsWith('.json') ? 'module.exports=' + JSON.stringify(JSON.parse(text)) : text)) => resolve(this.wrap(new URL(this.relative_path(data), 'http:a').pathname) + '(module,exports,require,global){' + (this._after[data] && this._after[data].forEach(cb => str = cb(str)), str) + '}')).catch(err => reject('Cannot locate module ' + data + '\n' + err))))).then(mods => resolve(this.wrapper[0] + 'var require=((l,i,h)=>(h="http:a",i=e=>(n,f=l[typeof URL=="undefined"?n.replace(/\\.\\//,"/"):new URL(n,e).pathname],u={browser:!0})=>{if(!f)throw new TypeError("Cannot find module \'"+n+"\'");f.call(u.exports={},u,u.exports,i(h+f.name),new(_=>_).constructor("return this")());return u.exports},i(h)))({' + mods.join(',') + '});' + this.wrapper[1] )).catch(reject));
 		}
+	},
+	adblock = {
+		filters: [],
+		exceptions: [],
+		test(url, type, dat){
+			// validation
+			
+			if(dat[2].script && type != 'js')return false;
+			if(dat[2].document && type != 'html')return false;
+			if(dat[2].subdocument && type != 'html')return false;
+			
+			if(dat[2].domain){
+				/*
+				domain
+					[0] applies
+					[1] exceptions
+				*/
+				if(!dat[2].domain[0].some(domain => domain.endsWith('.' + url.host) || domain == url.host) || dat[2].domain[1].includes(url.host))return;
+			}
+			
+			// regexing
+			// check against url without protocol
+			
+			var match = url.href.substr(url.href.indexOf(url.hostname)).match(dat[1]);
+			
+			return match || false;
+		},
+		match(url, type){
+			for(var ind = 0; ind < adblock.filters.length; ind++){
+				if(adblock.test(url, type, adblock.filters[ind])){
+					// match against exceptions
+					for(var exp_ind = 0; exp_ind < adblock.exceptions.length; exp_ind++)if(adblock.test(url, type, adblock.exceptions[exp_ind]))return;
+					
+					return adblock.filters[ind];
+				}
+			}
+		},
+		parse(rule){
+			var str = rule,
+				com_ind = str.indexOf('! ');
+			
+			if(com_ind != -1)str = str.slice(0, com_ind);
+			
+			var opt_ind = str.lastIndexOf('$'),
+				options = opt_ind == -1 ? {} : Object.fromEntries(str.substr(opt_ind + 1).split(',').map(val => val.split('=')));
+			
+			if(options.domain){
+				var domains = options.domain.split('|'),
+					applies = domains.filter(x => !x.startsWith('~')),
+					excepts = domains.filter(x => x.startsWith('~'));
+				
+				options.domain = [ applies, excepts ];
+			}
+			
+			if(opt_ind != -1)str = str.slice(0, opt_ind);
+			
+			var css_ind = str.indexOf('##');
+			
+			if(css_ind != -1)return; // str = str.slice(0, css_ind);
+			
+			var dir_ind = str.indexOf('||');
+			
+			if(dir_ind != -1)str = str.slice(dir_ind + 2);
+			
+			// exception
+			
+			var exp = str.startsWith('@@');
+			
+			if(exp)str = str.slice(2);
+			
+			if(!str || str.startsWith('[') || !str.length)return;
+			
+			/*
+			[0] string
+			[1] regex
+			[2] options
+			[3] exception
+			*/
+			
+			var regex = str.startsWith('/') && str.endsWith('/') ? new RegExp(str.slice(1, -1)) : new RegExp(str.replace(/[\[\]?$()\/\\|.+]/g, char => '\\' + char).replace(/\*/g, '.*?').replace(/\^/g, '([^a-zA-Z0-9_\\-.%]|^|$)'));
+			
+			adblock[exp ? 'exceptions' : 'filters'].push([ str, regex, options ]);
+		},
 	};
 
-fs.readFileSync(path.join(__dirname, 'easylist.txt'), 'utf8').split('\n').forEach(line => {
-	var str = line,
-		com_ind = line.indexOf('! ');
-	
-	if(com_ind != -1)str = str.slice(0, com_ind);
-	
-	var opt_ind = str.lastIndexOf('$'),
-		options = opt_ind == -1 ? {} : Object.fromEntries(str.substr(opt_ind + 1).split(',').map(val => val.split('=')));
-	
-	if(opt_ind != -1)str = str.slice(0, opt_ind);
-	
-	var css_ind = str.indexOf('##');
-	
-	if(css_ind != -1)return; // str = str.slice(0, css_ind);
-	
-	var dir_ind = str.indexOf('||');
-	
-	if(dir_ind != -1)str = str.slice(dir_ind + 2);
-	
-	// exception
-	
-	var exp = str.startsWith('@@');
-	
-	if(exp)str = str.slice(2);
-	
-	if(!str || str.startsWith('[') || !str.length)return;
-	
-	/*
-	[0] string
-	[1] regex
-	[2] options
-	[3] exception
-	*/
-	
-	var regex = str.startsWith('/') && str.endsWith('/') ? new RegExp(str.slice(1, -1)) : new RegExp(str.replace(/[\[\]?$()\/\\|.+]/g, char => '\\' + char).replace(/\*/g, '.*?').replace(/\^/g, '([^a-zA-Z0-9_\\-.%]|^|$)'));
-	
-	adblock[exp ? 'exceptions' : 'filters'].push([ str, regex, options, line ]);
-});
-
-var adblock_match = (url, type) => {
-	for(var exp_ind = 0, ind = 0; ind < adblock.filters.length; ind++){
-		if(test_filter(url, type, adblock.filters[ind])){
-			// match against exceptions
-			for(exp_ind = 0; exp_ind < adblock.exceptions.length; exp_ind++)if(test_filter(url, type, adblock.exceptions[exp_ind]))return;
-			
-			return adblock.filters[ind];
-		}
-	}
-}
+fs.readFileSync(path.join(__dirname, 'easylist.txt'), 'utf8').split('\n').forEach(adblock.parse);
 
 /*end_server*/
 
@@ -268,7 +280,7 @@ module.exports = class {
 								dec_headers = this.headers_decode(resp.headers, data);
 							
 							if(this.config.adblock){
-								var matched = adblock_match(url, type);
+								var matched = adblock.match(url, type);
 								
 								if(matched)return res.cgi_status(401, '<pre>EasyList has prevented the following page from loading:\n' + res.sanitize(url.href) + '\n\nBecause of the following filter:\n' + JSON.stringify(matched) + '</pre>');
 							}
