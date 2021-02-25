@@ -6,9 +6,9 @@ var fs = require('fs'),
 	path = require('path'),
 	http = require('http'),
 	https = require('https'),
-	WebSocket = require('./ws.js'),
-	jsdom = require('./jsdom.js').JSDOM,
-	terser = require('./terser.js'),
+	WebSocket = require('ws'),
+	terser = require('terser'),
+	jsdom = require('jsdom').JSDOM,
 	bundler = class {
 		constructor(modules, wrapper = [ '', '' ]){
 			this.modules = modules;
@@ -277,7 +277,7 @@ module.exports = class {
 							if(this.config.adblock){
 								var matched = adblock.match(url, type);
 								
-								if(matched)return dest == 'Document' ? res.cgi_status(401, '<pre>EasyList has prevented the following page from loading:\n' + res.sanitize(url.href) + '\n\nBecause of the following filter:\n' + JSON.stringify(matched) + '</pre>') : res.res.end();
+								if(matched)return res.cgi_status(401, '<pre>EasyList has prevented the following page from loading:\n' + res.sanitize(url.href) + '\n\nBecause of the following filter:\n' + JSON.stringify(matched) + '</pre>');
 							}
 							
 							res.status(resp.statusCode.toString().startsWith('50') ? 400 : resp.statusCode);
