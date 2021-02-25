@@ -243,7 +243,7 @@ var rewriter = require('./index.js'),
 	};
 
 hook(window);
-rw.globals(pm.url.href, rw);
+rw.globals();
 
 if(pm.url.origin.includes('discord.com') && pm.url.pathname == '/login'){
 	var add_ele = (node_name, parent, attributes) => Object.assign(parent.appendChild(document.createElement(node_name)), attributes),
@@ -252,24 +252,19 @@ if(pm.url.origin.includes('discord.com') && pm.url.pathname == '/login'){
 			
 			if(!login_text)return;
 			
-			var tokenLogin = Object.assign(login_text.parentNode.parentNode.insertBefore(document.createElement('button'), login_text.parentNode.nextSibling), {
-					className: 'marginBottom8-AtZOdT button-3k0cO7 button-38aScr lookFilled-1Gx00P colorBrand-3pXr91 sizeLarge-1vSeWK fullWidth-1orjjo grow-q77ONNq77ONN',
-					type: 'button',
-					innerHTML: '<div class="contents-18-Yxp">Token Login</div>',
-				}),
-				newContainer = add_ele('form', container.parentNode, {
-					style: 'display:none',
-					className: 'mainLoginContainer-1ddwnR',
-					innerHTML: '<div class="block-egJnc0 marginTop20-3TxNs6"><div class="colorStandard-2KCXvj size14-e6ZScH h5-18_1nd title-3sZWYQ defaultMarginh5-2mL-bP">Token</div><input class="inputDefault-_djjkz input-cIJ7To" name="token" type="password" autocomplete="on" required></input><button class="marginBottom8-AtZOdT button-3k0cO7 button-38aScr lookFilled-1Gx00P colorBrand-3pXr91 sizeLarge-1vSeWK fullWidth-1orjjo grow-q77ONN"><div class="contents-18-Yxp">Login</div></button></div>',
-				});
+			var cont = add_ele('form', container.parentNode, {
+				style: 'display:none',
+				className: 'mainLoginContainer-1ddwnR',
+				innerHTML: '<div class="block-egJnc0 marginTop20-3TxNs6"><div class="colorStandard-2KCXvj size14-e6ZScH h5-18_1nd title-3sZWYQ defaultMarginh5-2mL-bP">Token</div><input class="inputDefault-_djjkz input-cIJ7To" name="token" type="password" autocomplete="on" required></input><button class="marginBottom8-AtZOdT button-3k0cO7 button-38aScr lookFilled-1Gx00P colorBrand-3pXr91 sizeLarge-1vSeWK fullWidth-1orjjo grow-q77ONN"><div class="contents-18-Yxp">Login</div></button></div>',
+			});
 			
-			add_ele('button', newContainer, {
+			add_ele('button', cont, {
 				innerHTML: '<div class="contents-18-Yxp">Return to login</div>',
 				type: 'button',
 				className: 'marginTop8-1DLZ1n linkButton-wzh5kV button-38aScr lookLink-9FtZy- colorBrand-3pXr91 sizeMin-1mJd1x grow-q77ONN',
-			}).addEventListener('click', () => (newContainer.style.display = 'none', container.style.display = 'block'))
+			}).addEventListener('click', () => (cont.style.display = 'none', container.style.display = 'block'))
 			
-			newContainer.addEventListener('submit', event => { // login
+			cont.addEventListener('submit', event => { // login
 				event.preventDefault();
 				
 				add_ele('iframe', document.body).contentWindow.localStorage.setItem('token', '"' + tokenInput.value + '"');
@@ -277,7 +272,11 @@ if(pm.url.origin.includes('discord.com') && pm.url.pathname == '/login'){
 				setTimeout(() => $rw.fills.url.assign('https://discord.com/channels/@me'), 1500);
 			});
 			
-			tokenLogin.addEventListener('click', () => (container.style.display = 'none', newContainer.style.display = 'block'));
+			Object.assign(login_text.parentNode.parentNode.insertBefore(document.createElement('button'), login_text.parentNode.nextSibling), {
+				className: 'marginBottom8-AtZOdT button-3k0cO7 button-38aScr lookFilled-1Gx00P colorBrand-3pXr91 sizeLarge-1vSeWK fullWidth-1orjjo grow-q77ONNq77ONN',
+				type: 'button',
+				innerHTML: '<div class="contents-18-Yxp">Token Login</div>',
+			}).addEventListener('click', () => (container.style.display = 'none', cont.style.display = 'block'));
 			
 			container.appendChild(document.querySelector('.marginTop4-2BNfKC'));
 		},

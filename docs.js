@@ -29,6 +29,14 @@ ${ti}
 npm i sys-proxy
 ${ti}
 
+## Significant sites tested ( as of 2/22/2021 ):
+
+- krunker.io
+- 1v1.lol
+- justbuild.lol
+- youtube.com ( only player )
+- twitch.tv
+
 ### Demo:
 
 See the [demo folder](demo/) for more usage examples

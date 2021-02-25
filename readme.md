@@ -19,6 +19,14 @@ node ./sys-proxy/demo
 npm i sys-proxy
 ```
 
+## Significant sites tested ( as of 2/22/2021 ):
+
+- krunker.io
+- 1v1.lol
+- justbuild.lol
+- youtube.com ( only player )
+- twitch.tv
+
 ### Demo:
 
 See the [demo folder](demo/) for more usage examples
@@ -88,14 +96,16 @@ var nodehttp = require('sys-nodehttp'),
     -   [valid_url][36]
         -   [Parameters][37]
     -   [str_conf][38]
-    -   [globals][39]
+    -   [get_globals][39]
         -   [Parameters][40]
-    -   [html_serial][41]
+    -   [globals][41]
         -   [Parameters][42]
-    -   [wrap][43]
+    -   [html_serial][43]
         -   [Parameters][44]
-    -   [checksum][45]
+    -   [wrap][45]
         -   [Parameters][46]
+    -   [checksum][47]
+        -   [Parameters][48]
 
 ## index
 
@@ -103,27 +113,27 @@ Rewriter
 
 ### Parameters
 
--   `config` **[Object][47]** 
-    -   `config.adblock` **[Boolean][48]?** Determines if the adblock.txt file should be used for checking URLs
-    -   `config.ruffle` **[Boolean][48]?** Determines if ruffle.rs should be used for flash content
-    -   `config.ws` **[Boolean][48]?** Determines if websocket support should be added
-    -   `config.codec` **[Object][47]?** The codec to be used (rewriter.codec.plain, base64, xor)
-    -   `config.prefix` **[Boolean][48]?** The prefix to run the proxy on
-    -   `config.interface` **[Boolean][48]?** The network interface to request from
-    -   `config.timeout` **[Boolean][48]?** The maximum request timeout time
-    -   `config.title` **[Boolean][48]?** The title of the pages visited
-    -   `config.http_agent` **[Object][47]?** Agent to be used for http&#x3A; / ws: requests
-    -   `config.https_agent` **[Object][47]?** Agent to be used for https&#x3A; / wss: requests
--   `server` **[Object][47]** nodehttp/express server to run the proxy on, only on the serverside this is required
+-   `config` **[Object][49]** 
+    -   `config.adblock` **[Boolean][50]?** Determines if the adblock.txt file should be used for checking URLs
+    -   `config.ruffle` **[Boolean][50]?** Determines if ruffle.rs should be used for flash content
+    -   `config.ws` **[Boolean][50]?** Determines if websocket support should be added
+    -   `config.codec` **[Object][49]?** The codec to be used (rewriter.codec.plain, base64, xor)
+    -   `config.prefix` **[Boolean][50]?** The prefix to run the proxy on
+    -   `config.interface` **[Boolean][50]?** The network interface to request from
+    -   `config.timeout` **[Boolean][50]?** The maximum request timeout time
+    -   `config.title` **[Boolean][50]?** The title of the pages visited
+    -   `config.http_agent` **[Object][49]?** Agent to be used for http&#x3A; / ws: requests
+    -   `config.https_agent` **[Object][49]?** Agent to be used for https&#x3A; / wss: requests
+-   `server` **[Object][49]** nodehttp/express server to run the proxy on, only on the serverside this is required
 
 ### Properties
 
--   `mime` **[Object][47]** Contains mime data for categorizing mimes
--   `attr` **[Object][47]** Contains attribute data for categorizing attributes and tags
--   `attr_ent` **[Object][47]** Object.entries called on attr property
--   `regex` **[Object][47]** Contains regexes used throughout the rewriter
--   `config` **[Object][47]** Where the config argument is stored
--   `URL` **[Object][47]** class extending URL with the `fullpath` property
+-   `mime` **[Object][49]** Contains mime data for categorizing mimes
+-   `attr` **[Object][49]** Contains attribute data for categorizing attributes and tags
+-   `attr_ent` **[Object][49]** Object.entries called on attr property
+-   `regex` **[Object][49]** Contains regexes used throughout the rewriter
+-   `config` **[Object][49]** Where the config argument is stored
+-   `URL` **[Object][49]** class extending URL with the `fullpath` property
 
 ### url
 
@@ -132,15 +142,15 @@ Prefixes a URL and encodes it
 #### Parameters
 
 -   `value`  
--   `data` **[Object][47]** Standard object for all rewriter handlers (optional, default `{}`)
-    -   `data.origin` **[Object][47]** The page location or URL (eg localhost)
-    -   `data.base` **[Object][47]?** Base URL, default is decoded version of the origin
-    -   `data.route` **[Object][47]?** Adds to the query params if the result should be handled by the rewriter
-    -   `data.type` **[Object][47]?** The type of URL this is (eg js, css, html), helps the rewriter determine how to handle the response
-    -   `data.ws` **[Object][47]?** If the URL is a WebSocket
--   `null-null` **([String][49] \| [URL][50] \| [Request][51])** URL value
+-   `data` **[Object][49]** Standard object for all rewriter handlers (optional, default `{}`)
+    -   `data.origin` **[Object][49]** The page location or URL (eg localhost)
+    -   `data.base` **[Object][49]?** Base URL, default is decoded version of the origin
+    -   `data.route` **[Object][49]?** Adds to the query params if the result should be handled by the rewriter
+    -   `data.type` **[Object][49]?** The type of URL this is (eg js, css, html), helps the rewriter determine how to handle the response
+    -   `data.ws` **[Object][49]?** If the URL is a WebSocket
+-   `null-null` **([String][51] \| [URL][52] \| [Request][53])** URL value
 
-Returns **[String][49]** Proxied URL
+Returns **[String][51]** Proxied URL
 
 ### unurl
 
@@ -150,9 +160,9 @@ Attempts to decode a URL previously ran throw the URL handler
 
 -   `value`  
 -   `data`   (optional, default `{}`)
--   `null-null` **[String][49]** URL value
+-   `null-null` **[String][51]** URL value
 
-Returns **[String][49]** Normal URL
+Returns **[String][51]** Normal URL
 
 ### js
 
@@ -160,13 +170,13 @@ Scopes JS and adds in filler objects
 
 #### Parameters
 
--   `value` **[String][49]** JS code
--   `data` **[Object][47]** Standard object for all rewriter handlers (optional, default `{}`)
-    -   `data.origin` **[Object][47]** The page location or URL (eg localhost)
-    -   `data.base` **[Object][47]?** Base URL, default is decoded version of the origin
-    -   `data.route` **[Object][47]?** Adds to the query params if the result should be handled by the rewriter
+-   `value` **[String][51]** JS code
+-   `data` **[Object][49]** Standard object for all rewriter handlers (optional, default `{}`)
+    -   `data.origin` **[Object][49]** The page location or URL (eg localhost)
+    -   `data.base` **[Object][49]?** Base URL, default is decoded version of the origin
+    -   `data.route` **[Object][49]?** Adds to the query params if the result should be handled by the rewriter
 
-Returns **[String][49]** 
+Returns **[String][51]** 
 
 ### css
 
@@ -174,13 +184,13 @@ Rewrites CSS urls and selectors
 
 #### Parameters
 
--   `value` **[String][49]** CSS code
--   `data` **[Object][47]** Standard object for all rewriter handlers (optional, default `{}`)
-    -   `data.origin` **[Object][47]** The page location or URL (eg localhost)
-    -   `data.base` **[Object][47]?** Base URL, default is decoded version of the origin
-    -   `data.route` **[Object][47]?** Adds to the query params if the result should be handled by the rewriter
+-   `value` **[String][51]** CSS code
+-   `data` **[Object][49]** Standard object for all rewriter handlers (optional, default `{}`)
+    -   `data.origin` **[Object][49]** The page location or URL (eg localhost)
+    -   `data.base` **[Object][49]?** Base URL, default is decoded version of the origin
+    -   `data.route` **[Object][49]?** Adds to the query params if the result should be handled by the rewriter
 
-Returns **[String][49]** 
+Returns **[String][51]** 
 
 ### manifest
 
@@ -188,13 +198,13 @@ Rewrites manifest JSON data, needs the data object since the URL handler is call
 
 #### Parameters
 
--   `value` **[String][49]** Manifest code
--   `data` **[Object][47]** Standard object for all rewriter handlers (optional, default `{}`)
-    -   `data.origin` **[Object][47]** The page location or URL (eg localhost)
-    -   `data.base` **[Object][47]?** Base URL, default is decoded version of the origin
-    -   `data.route` **[Object][47]?** Adds to the query params if the result should be handled by the rewriter
+-   `value` **[String][51]** Manifest code
+-   `data` **[Object][49]** Standard object for all rewriter handlers (optional, default `{}`)
+    -   `data.origin` **[Object][49]** The page location or URL (eg localhost)
+    -   `data.base` **[Object][49]?** Base URL, default is decoded version of the origin
+    -   `data.route` **[Object][49]?** Adds to the query params if the result should be handled by the rewriter
 
-Returns **[String][49]** 
+Returns **[String][51]** 
 
 ### html
 
@@ -202,14 +212,14 @@ Parses and modifies HTML, needs the data object since the URL handler is called
 
 #### Parameters
 
--   `value` **[String][49]** Manifest code
--   `data` **[Object][47]** Standard object for all rewriter handlers (optional, default `{}`)
-    -   `data.snippet` **[Boolean][48]?** If the HTML code is a snippet and if it shouldn't have the rewriter scripts added
-    -   `data.origin` **[Object][47]** The page location or URL (eg localhost)
-    -   `data.base` **[Object][47]?** Base URL, default is decoded version of the origin
-    -   `data.route` **[Object][47]?** Adds to the query params if the result should be handled by the rewriter
+-   `value` **[String][51]** Manifest code
+-   `data` **[Object][49]** Standard object for all rewriter handlers (optional, default `{}`)
+    -   `data.snippet` **[Boolean][50]?** If the HTML code is a snippet and if it shouldn't have the rewriter scripts added
+    -   `data.origin` **[Object][49]** The page location or URL (eg localhost)
+    -   `data.base` **[Object][49]?** Base URL, default is decoded version of the origin
+    -   `data.route` **[Object][49]?** Adds to the query params if the result should be handled by the rewriter
 
-Returns **[String][49]** 
+Returns **[String][51]** 
 
 ### html_attr
 
@@ -217,12 +227,12 @@ Validates and parses attributes, needs data since multiple handlers are called
 
 #### Parameters
 
--   `node` **([Node][52] \| [Object][47])** Object containing at least getAttribute and setAttribute
--   `name` **[String][49]** Name of the attribute
--   `data` **[Object][47]** Standard object for all rewriter handlers
-    -   `data.origin` **[Object][47]** The page location or URL (eg localhost)
-    -   `data.base` **[Object][47]?** Base URL, default is decoded version of the origin
-    -   `data.route` **[Object][47]?** Adds to the query params if the result should be handled by the rewriter
+-   `node` **([Node][54] \| [Object][49])** Object containing at least getAttribute and setAttribute
+-   `name` **[String][51]** Name of the attribute
+-   `data` **[Object][49]** Standard object for all rewriter handlers
+    -   `data.origin` **[Object][49]** The page location or URL (eg localhost)
+    -   `data.base` **[Object][49]?** Base URL, default is decoded version of the origin
+    -   `data.route` **[Object][49]?** Adds to the query params if the result should be handled by the rewriter
 
 ### plain
 
@@ -230,8 +240,8 @@ Soon to add removing the servers IP, mainly for converting values to strings whe
 
 #### Parameters
 
--   `value` **([String][49] \| [Buffer][53])** Data to convert to a string
--   `data` **[Object][47]** Standard object for all rewriter handlers
+-   `value` **([String][51] \| [Buffer][55])** Data to convert to a string
+-   `data` **[Object][49]** Standard object for all rewriter handlers
 
 ### decode_blob
 
@@ -242,7 +252,7 @@ Decoding blobs
 -   `data`  
 -   `Blob`  
 
-Returns **[String][49]** 
+Returns **[String][51]** 
 
 ### attr_type
 
@@ -250,10 +260,10 @@ Determines the attribute type using the `attr_ent` property
 
 #### Parameters
 
--   `name` **[String][49]** Property name
--   `tag` **[String][49]?** Element tag
+-   `name` **[String][51]** Property name
+-   `tag` **[String][51]?** Element tag
 
-Returns **[String][49]** 
+Returns **[String][51]** 
 
 ### headers_decode
 
@@ -263,9 +273,9 @@ Prepares headers to be sent to the client from a server
 
 -   `value`  
 -   `data`   (optional, default `{}`)
--   `null-null` **[Object][47]** Headers
+-   `null-null` **[Object][49]** Headers
 
-Returns **[Object][47]** 
+Returns **[Object][49]** 
 
 ### headers_encode
 
@@ -274,15 +284,15 @@ Prepares headers to be sent to the server from a client, calls URL handler so da
 #### Parameters
 
 -   `value`  
--   `data` **[Object][47]** Standard object for all rewriter handlers (optional, default `{}`)
-    -   `data.origin` **[Object][47]** The page location or URL (eg localhost)
-    -   `data.base` **[Object][47]?** Base URL, default is decoded version of the origin
-    -   `data.route` **[Object][47]?** Adds to the query params if the result should be handled by the rewriter
-    -   `data.type` **[Object][47]?** The type of URL this is (eg js, css, html), helps the rewriter determine how to handle the response
-    -   `data.ws` **[Object][47]?** If the URL is a WebSocket
--   `null-null` **[Object][47]** Headers
+-   `data` **[Object][49]** Standard object for all rewriter handlers (optional, default `{}`)
+    -   `data.origin` **[Object][49]** The page location or URL (eg localhost)
+    -   `data.base` **[Object][49]?** Base URL, default is decoded version of the origin
+    -   `data.route` **[Object][49]?** Adds to the query params if the result should be handled by the rewriter
+    -   `data.type` **[Object][49]?** The type of URL this is (eg js, css, html), helps the rewriter determine how to handle the response
+    -   `data.ws` **[Object][49]?** If the URL is a WebSocket
+-   `null-null` **[Object][49]** Headers
 
-Returns **[Object][47]** 
+Returns **[Object][49]** 
 
 ### cookie_encode
 
@@ -290,12 +300,12 @@ Prepares cookies to be sent to the client from a server, calls URL handler so
 
 #### Parameters
 
--   `value` **[String][49]** Cookie header
--   `data` **[Object][47]** Standard object for all rewriter handlers (optional, default `{}`)
-    -   `data.origin` **[Object][47]** The page location or URL (eg localhost)
-    -   `data.url` **[Object][47]** Base URL (needed for hostname when adding suffix)
+-   `value` **[String][51]** Cookie header
+-   `data` **[Object][49]** Standard object for all rewriter handlers (optional, default `{}`)
+    -   `data.origin` **[Object][49]** The page location or URL (eg localhost)
+    -   `data.url` **[Object][49]** Base URL (needed for hostname when adding suffix)
 
-Returns **[Object][47]** 
+Returns **[Object][49]** 
 
 ### cookie_decode
 
@@ -303,12 +313,12 @@ Prepares cookies to be sent to the server from a client, calls URL handler so
 
 #### Parameters
 
--   `value` **[String][49]** Cookie header
--   `data` **[Object][47]** Standard object for all rewriter handlers (optional, default `{}`)
-    -   `data.origin` **[Object][47]** The page location or URL (eg localhost)
-    -   `data.url` **[Object][47]** Base URL (needed for hostname when adding suffix)
+-   `value` **[String][51]** Cookie header
+-   `data` **[Object][49]** Standard object for all rewriter handlers (optional, default `{}`)
+    -   `data.origin` **[Object][49]** The page location or URL (eg localhost)
+    -   `data.url` **[Object][49]** Base URL (needed for hostname when adding suffix)
 
-Returns **[Object][47]** 
+Returns **[Object][49]** 
 
 ### decode_params
 
@@ -317,7 +327,7 @@ Decode params of URL, takes the prefix and then decodes a querystring
 #### Parameters
 
 -   `url`  
--   `URL` **([URL][50] \| [String][49])** to parse
+-   `URL` **([URL][52] \| [String][51])** to parse
 
 Returns **URLSearchParams** 
 
@@ -330,9 +340,9 @@ Decompresses response data
 -   `req`  
 -   `res`  
 -   `callback`  
--   `Client` **[Object][47]** request
--   `Request` **[Object][47]** response
--   `Callback` **[Function][54]** 
+-   `Client` **[Object][49]** request
+-   `Request` **[Object][49]** response
+-   `Callback` **[Function][56]** 
 
 ### valid_url
 
@@ -341,16 +351,27 @@ Validates a URL
 #### Parameters
 
 -   `args` **...any** 
--   `URL` **([URL][50] \| [String][49])** to parse
--   `Base` **([URL][50] \| [String][49])?** 
+-   `URL` **([URL][52] \| [String][51])** to parse
+-   `Base` **([URL][52] \| [String][51])?** 
 
-Returns **([Undefined][55] \| [URL][50])** Result, is undefined if an error occured
+Returns **([Undefined][57] \| [URL][52])** Result, is undefined if an error occured
 
 ### str_conf
 
 Returns a string version of the config\`
 
-Returns **[Object][47]** 
+Returns **[Object][49]** 
+
+### get_globals
+
+Retrieves global data/creates if needed
+
+#### Parameters
+
+-   `global` **[Object][49]** 
+-   `url` **[URL][52]** 
+
+Returns **[Object][49]** 
 
 ### globals
 
@@ -359,11 +380,7 @@ Globals, called in the client to set any global data or get the proper fills obj
 #### Parameters
 
 -   `url`  
--   `rw`  
--   `Local` **[URL][50]** URL incase the global object is not set
--   `Rewriter` **[Object][47]** instance
-
-Returns **[Object][47]** Fills
+-   `URL`  URL] - needed if page URL is not set globally
 
 ### html_serial
 
@@ -372,9 +389,9 @@ Serializes a JSDOM or DOMParser object
 #### Parameters
 
 -   `dom`  
--   `DOM` **[Document][56]** 
+-   `DOM` **[Document][58]** 
 
-Returns **[String][49]** 
+Returns **[String][51]** 
 
 ### wrap
 
@@ -385,7 +402,7 @@ Wraps a string
 -   `str`  
 -   `String`  
 
-Returns **[String][49]** 
+Returns **[String][51]** 
 
 ### checksum
 
@@ -398,7 +415,7 @@ Runs a checksum on a string
 -   `t`   (optional, default `r.length`)
 -   `String`  
 
-Returns **[Number][57]** 
+Returns **[Number][59]** 
 
 [1]: #index
 
@@ -476,43 +493,47 @@ Returns **[Number][57]**
 
 [38]: #str_conf
 
-[39]: #globals
+[39]: #get_globals
 
 [40]: #parameters-18
 
-[41]: #html_serial
+[41]: #globals
 
 [42]: #parameters-19
 
-[43]: #wrap
+[43]: #html_serial
 
 [44]: #parameters-20
 
-[45]: #checksum
+[45]: #wrap
 
 [46]: #parameters-21
 
-[47]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object
+[47]: #checksum
 
-[48]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Boolean
+[48]: #parameters-22
 
-[49]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String
+[49]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Object
 
-[50]: https://developer.mozilla.org/docs/Web/API/URL/URL
+[50]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Boolean
 
-[51]: https://developer.mozilla.org/Add-ons/SDK/High-Level_APIs/request
+[51]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/String
 
-[52]: https://developer.mozilla.org/docs/Web/API/Node/nextSibling
+[52]: https://developer.mozilla.org/docs/Web/API/URL/URL
 
-[53]: https://nodejs.org/api/buffer.html
+[53]: https://developer.mozilla.org/Add-ons/SDK/High-Level_APIs/request
 
-[54]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Statements/function
+[54]: https://developer.mozilla.org/docs/Web/API/Node/nextSibling
 
-[55]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/undefined
+[55]: https://nodejs.org/api/buffer.html
 
-[56]: https://developer.mozilla.org/docs/Web/API/Document
+[56]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Statements/function
 
-[57]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Number
+[57]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/undefined
+
+[58]: https://developer.mozilla.org/docs/Web/API/Document
+
+[59]: https://developer.mozilla.org/docs/Web/JavaScript/Reference/Global_Objects/Number
 
 
 ## How it works:
