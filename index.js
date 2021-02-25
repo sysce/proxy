@@ -1042,8 +1042,8 @@ module.exports = class {
 			global = new (_=>_).constructor('return this')(),
 			URL = this.URL,
 			_pm_ = this.get_globals(global),
-			Reflect = Object.fromEntries(Object.getOwnPropertyNames(global.Reflect).map(key => [ key, global.Reflect[key] ])),
 			backup = (obj, key, sub) => (sub = _pm_.backups.has(obj) ? _pm_.backups.get(obj) : _pm_.backups.set(obj, Object.setPrototypeOf({}, null)), sub[key] || (sub[key] = obj[key])),
+			Reflect = Object.fromEntries(Object.getOwnPropertyNames(global.Reflect).map(key => [ key, backup(global.Reflect, key) ])),
 			Proxy = backup(global, 'Proxy'),
 			Symbol = backup(global, 'Symbol'),
 			def = {
