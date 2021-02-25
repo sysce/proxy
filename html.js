@@ -19,7 +19,7 @@ var rewriter = require('./index.js'),
 		rw_data: data => Object.assign({ url: pm.url, base: pm.url, origin: pm.get_href() }, data ? data : {}),
 		init: global.__pm_init__,
 		url: $rw.url || ($rw.url = new URL($rw.url || rw.unurl(global.location.href, { origin: global.location }))),
-		unnormal: arg => Array.isArray(arg) ? arg.map(pm.unnormal) : (arg && arg[$rw.hooked]) ? arg[$rw.hooked] : arg,
+		unnormal: arg => Array.isArray(arg) ? arg.map(pm.unnormal) : $rw.proxied.get(arg) || arg,
 		frame(win){
 			try{
 				if(win && !win.$rw){

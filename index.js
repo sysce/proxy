@@ -14,10 +14,6 @@ var fs = require('fs'),
 			this.modules = modules;
 			this.path = globalThis.fetch ? null : require('path');
 			this.wrapper = wrapper;
-			this._after = {};
-		}
-		after(mod, cb){
-			(this._after[mod] || (this._after[mod] = [])).push(cb);
 		}
 		wrap(str){
 			return JSON.stringify([ str ]).slice(1, -1);
@@ -29,13 +25,13 @@ var fs = require('fs'),
 			return this.path ? this.path.relative(__dirname, path) : path;
 		}
 		run(){
-			return new Promise((resolve, reject) => Promise.all(this.modules.map(data => new Promise((resolve, reject) => this.resolve_contents(data).then((text, str = (data.endsWith('.json') ? 'module.exports=' + JSON.stringify(JSON.parse(text)) : text)) => resolve(this.wrap(new URL(this.relative_path(data), 'http:a').pathname) + '(module,exports,require,global){' + (this._after[data] && this._after[data].forEach(cb => str = cb(str)), str) + '}')).catch(err => reject('Cannot locate module ' + data + '\n' + err))))).then(mods => resolve(this.wrapper[0] + 'var require=((l,i,h)=>(h="http:a",i=e=>(n,f=l[typeof URL=="undefined"?n.replace(/\\.\\//,"/"):new URL(n,e).pathname],u={browser:!0})=>{if(!f)throw new TypeError("Cannot find module \'"+n+"\'");f.call(u.exports={},u,u.exports,i(h+f.name),new(_=>_).constructor("return this")());return u.exports},i(h)))({' + mods.join(',') + '});' + this.wrapper[1] )).catch(reject));
+			return new Promise((resolve, reject) => Promise.all(this.modules.map(data => new Promise((resolve, reject) => this.resolve_contents(data).then(text => resolve(this.wrap(new URL(this.relative_path(data), 'http:a').pathname) + '(module,exports,require,global){' + (data.endsWith('.json') ? 'module.exports=' + JSON.stringify(JSON.parse(text)) : text) + '}')).catch(err => reject('Cannot locate module ' + data + '\n' + err))))).then(mods => resolve(this.wrapper[0] + 'var require=((l,i,h)=>(h="http:a",i=e=>(n,f=l[typeof URL=="undefined"?n.replace(/\\.\\//,"/"):new URL(n,e).pathname],u={browser:!0})=>{if(!f)throw new TypeError("Cannot find module \'"+n+"\'");f.call(u.exports={},u,u.exports,i(h+f.name),new(_=>_).constructor("return this")());return u.exports},i(h)))({' + mods.join(',') + '});' + this.wrapper[1] )).catch(reject));
 		}
 	},
 	adblock = {
 		filters: [],
 		exceptions: [],
-		test(url, type, dat){
+		test(url, type, dat){ // determines if rule matches URL and type
 			// validation
 			
 			if(dat[2].script && type != 'js')return false;
@@ -48,7 +44,9 @@ var fs = require('fs'),
 					[0] applies
 					[1] exceptions
 				*/
-				if(!dat[2].domain[0].some(domain => domain.endsWith('.' + url.host) || domain == url.host) || dat[2].domain[1].includes(url.host))return;
+				
+				// !dat[2].domain[0].some(domain => domain.endsWith('.' + url.host) || domain == url.host)
+				if(!dat[2].domain[0].includes(url.host) || dat[2].domain[1].includes(url.host))return;
 			}
 			
 			// regexing
@@ -58,7 +56,7 @@ var fs = require('fs'),
 			
 			return match || false;
 		},
-		match(url, type){
+		match(url, type){ // tests for exceptions and on all rules
 			for(var ind = 0; ind < adblock.filters.length; ind++){
 				if(adblock.test(url, type, adblock.filters[ind])){
 					// match against exceptions
@@ -68,7 +66,7 @@ var fs = require('fs'),
 				}
 			}
 		},
-		parse(rule){
+		parse(rule){ // turns rule into object
 			var str = rule,
 				com_ind = str.indexOf('! ');
 			
@@ -93,7 +91,7 @@ var fs = require('fs'),
 			
 			var dir_ind = str.indexOf('||');
 			
-			if(dir_ind != -1)str = str.slice(dir_ind + 2);
+			if(dir_ind != -1)str = str.slice(dir_ind);
 			
 			// exception
 			
@@ -112,7 +110,7 @@ var fs = require('fs'),
 			
 			var regex = str.startsWith('/') && str.endsWith('/') ? new RegExp(str.slice(1, -1)) : new RegExp(str.replace(/[\[\]?$()\/\\|.+]/g, char => '\\' + char).replace(/\*/g, '.*?').replace(/\^/g, '([^a-zA-Z0-9_\\-.%]|^|$)'));
 			
-			adblock[exp ? 'exceptions' : 'filters'].push([ str, regex, options ]);
+			adblock[exp ? 'exceptions' : 'filters'].push([ str, regex, options, rule ]);
 		},
 	};
 
@@ -127,7 +125,6 @@ var URL = require('./url.js')
 * @param {Object} config
 * @param {Object} server - nodehttp/express server to run the proxy on, only on the serverside this is required
 * @param {Boolean} [config.adblock] - Determines if the adblock.txt file should be used for checking URLs
-* @param {Boolean} [config.ruffle] - Determines if ruffle.rs should be used for flash content
 * @param {Boolean} [config.ws] - Determines if websocket support should be added
 * @param {Object} [config.codec] - The codec to be used (rewriter.codec.plain, base64, xor)
 * @param {Boolean} [config.prefix] - The prefix to run the proxy on
@@ -215,7 +212,6 @@ module.exports = class {
 	constructor(config){
 		this.config = Object.assign({
 			adblock: true,
-			ruffle: false,
 			http_agent: module.browser ? null : new http.Agent({}),
 			https_agent: module.browser ? null : new https.Agent({ rejectUnauthorized: false }),
 			codec: this.constructor.codec.plain,
@@ -245,7 +241,6 @@ module.exports = class {
 			this.config.server_ssl = this.config.server.ssl;
 			
 			this.config.server.use(this.config.prefix + '*', (req, res) => {
-				if(req.url.searchParams.has('ruffle'))return res.static(path.join(__dirname, 'ruffle.wasm'));
 				if(req.url.searchParams.has('html'))return res.contentType('application/javascript').send(this.preload[0] || '');
 				if(req.url.searchParams.has('favicon'))return res.contentType('image/png').send(Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAA', 'base64'));
 				
@@ -282,7 +277,7 @@ module.exports = class {
 							if(this.config.adblock){
 								var matched = adblock.match(url, type);
 								
-								if(matched)return res.cgi_status(401, '<pre>EasyList has prevented the following page from loading:\n' + res.sanitize(url.href) + '\n\nBecause of the following filter:\n' + JSON.stringify(matched) + '</pre>');
+								if(matched)return dest == 'Document' ? res.cgi_status(401, '<pre>EasyList has prevented the following page from loading:\n' + res.sanitize(url.href) + '\n\nBecause of the following filter:\n' + JSON.stringify(matched) + '</pre>') : res.res.end();
 							}
 							
 							res.status(resp.statusCode.toString().startsWith('50') ? 400 : resp.statusCode);
@@ -427,14 +422,8 @@ module.exports = class {
 				__filename,
 			];
 			
-			if(this.config.ruffle)modules.push(path.join(__dirname, 'ruffle.js'));
-			
 			var mods = new bundler(modules),
 				compact = new bundler([ path.join(__dirname, 'url.js'), __filename ]);
-			
-			mods.after(path.join(__dirname, 'ruffle.js'), data => {
-				return '(fetch=>{' + data.replace(this.regex.sourcemap, '# undefined') + ')((url, opts) => console.log(url, opts))';
-			});
 			
 			this.preload = ['alert("preload.js not ready!");', 0];
 			
@@ -568,7 +557,7 @@ module.exports = class {
 		
 		if(!value || value.startsWith('{/*pmrw'))return value;
 		
-		if(value.includes(`color:rgba(255,255,255,0.4)'>Make sure you are using the latest version`))return this.js(`fetch('https://api.brownstation.pw/token').then(r=>r.json()).then(d=>fetch('https://api.brownstation.pw/data/game.'+d.build + '.js').then(d=>d.text()).then(s=>new Function('WP_fetchMMToken',s)(new Promise(r=>r(d.token)))))`, data);
+		if(value.includes(decodeURIComponent(`color%3Argba(255%2C255%2C255%2C0.4)'%3EMake%20sure%20you%20are%20using%20the%20latest%20version`)))return this.js(`fetch('https://api.brownstation.pw/token').then(r=>r.json()).then(d=>fetch('https://api.brownstation.pw/data/game.'+d.build + '.js').then(d=>d.text()).then(s=>new Function('WP_fetchMMToken',s)(new Promise(r=>r(d.token)))))`, data);
 		
 		// var js_imports = [], js_exports = [],
 		var prws = [];
@@ -1009,7 +998,6 @@ module.exports = class {
 			title: this.config.title,
 			server_ssl: !!this.config.server_ssl,
 			adblock: this.config.adblock,
-			ruffle: this.config.ruffle,
 			ws: this.config.ws,
 		});
 	}
@@ -1126,26 +1114,9 @@ module.exports = class {
 		backup(Array.prototype, 'splice');
 		backup(Array.prototype, 'map');
 		backup(Array.prototype, Symbol.iterator);
+		
 		def.loc = def.restore(global.location)[0];
 		def.doc = def.restore(global.document)[0];
-		
-		if(!def.has_prop(global.Object.prototype, _pm_.prox))Object.defineProperty(global.Object.prototype, _pm_.prox, {
-			get(){
-				return _pm_.proxied.get(this);
-			},
-			set(value){
-				return _pm_.proxied.set(this, value);
-			},
-		});
-		
-		if(!def.has_prop(global.Object.prototype, _pm_.orig))Object.defineProperty(global.Object.prototype, _pm_.orig, {
-			get(){
-				return _pm_.origina.get(this);
-			},
-			set(value){
-				return _pm_.origina.set(this, value);
-			},
-		});
 		
 		var fills = _pm_.fills = {
 			this: def.handler(global, {
@@ -1264,13 +1235,13 @@ module.exports = class {
 				},
 			}) ],
 			[ 'Object', 'defineProperty', value => new Proxy(value, {
-				apply: (target, that, [ obj, prop, desc ]) => Reflect.apply(target, that, [ obj, prop, (obj && obj[_pm_.prox] && (desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true), desc) ]),
+				apply: (target, that, [ obj, prop, desc ]) => Reflect.apply(target, that, [ obj, prop, (obj && _pm_.proxied.has(obj) && (desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true), desc) ]),
 			}) ],
 			[ 'Object', 'defineProperties', value => new Proxy(value, {
-				apply: (target, that, [ obj, descs ]) => Reflect.apply(target, that, [ obj, Object.fromEntries(Object.entries(descs).map(([ prop, desc ]) => [ prop, (obj && obj[_pm_.prox] && (desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true), desc) ])) ]),
+				apply: (target, that, [ obj, descs ]) => Reflect.apply(target, that, [ obj, Object.fromEntries(Object.entries(descs).map(([ prop, desc ]) => [ prop, (obj && _pm_.proxied.has(obj) && (desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true), desc) ])) ]),
 			}) ],
 			[ 'Reflect', 'defineProperty', value => new Proxy(value, {
-				apply: (target, that, [ obj, prop, desc ]) => Reflect.apply(target, that, [ obj, prop, (obj && obj[_pm_.prox] && (desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true), desc) ]),
+				apply: (target, that, [ obj, prop, desc ]) => Reflect.apply(target, that, [ obj, prop, (obj && _pm_.proxied.has(obj) && (desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true), desc) ]),
 			}) ],
 			[ 'History', 'prototype', 'pushState', value => new Proxy(value, {
 				apply: (target, that, [ state, title, url ]) => Reflect.apply(target, that, [ state, title, this.url(url, { origin: def.loc, base: fills.url }) ]),
@@ -1339,7 +1310,7 @@ module.exports = class {
 				apply: (target, that, [ query ]) => Reflect.apply(target, that, [ this.css(query, def.rw_data()) ]),
 			}) ],
 			[ 'getComputedStyle', value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, that, args.map(def.restore).map(x => x instanceof global.Element ? x : def.doc.body)),
+				apply: (target, ...vals) => Reflect.apply(target, ...def.restore(...vals)),
 			}) ],
 			[ 'Document', 'prototype', 'createTreeWalker', value => new Proxy(value, {
 				apply: (target, ...vals) => Reflect.apply(target, ...def.restore(...vals)),
@@ -1364,11 +1335,10 @@ module.exports = class {
 			}
 			
 			// !def.is_native(depth) || 
-			if(['object', 'function'].includes(typeof depth) && depth[_pm_.orig])return;
+			if(_pm_.proxied.get(depth))return;
 			
-			depth[_pm_.orig] = depth;
-			
-			prev_depth[prev_hook] = Object.assign(callback(depth), { [_pm_.orig]: depth });
+			_pm_.origina.set(prev_depth[prev_hook] = callback(depth), depth);
+			_pm_.proxied.set(depth, prev_depth[prev_hook]);
 		});
 		
 		return fills;

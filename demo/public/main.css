@@ -158,6 +158,13 @@ h1 {
 	margin: 0px;
 }
 
+pre {
+	white-space: pre-wrap;
+	text-overflow: ellipsis;
+	max-width: 100%;
+	overflow: hidden;
+}
+
 @media only screen and (max-height: 300px) {
 	.buttons {
 		display: none

@@ -115,7 +115,6 @@ Rewriter
 
 -   `config` **[Object][49]** 
     -   `config.adblock` **[Boolean][50]?** Determines if the adblock.txt file should be used for checking URLs
-    -   `config.ruffle` **[Boolean][50]?** Determines if ruffle.rs should be used for flash content
     -   `config.ws` **[Boolean][50]?** Determines if websocket support should be added
     -   `config.codec` **[Object][49]?** The codec to be used (rewriter.codec.plain, base64, xor)
     -   `config.prefix` **[Boolean][50]?** The prefix to run the proxy on

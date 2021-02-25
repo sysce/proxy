@@ -13,7 +13,6 @@ var fs = require('fs'),
 			cert: fs.readFileSync(path.join(__dirname, 'ssl.crt'), 'utf8'),
 		} : false,
 		adblock: true,
-		ruffle: true,
 	}),
 	rw = new rewriter({
 		prefix: '/service',
