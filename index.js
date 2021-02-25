@@ -18,13 +18,11 @@ var fs = require('fs'),
 		if(dat[2].subdocument && type != 'html')return false;
 		
 		if(dat[2].domain){
-			var domains = dat[2].domain.split('|');
+			var domains = dat[2].domain.split('|'),
+				applies = domains.filter(x => !x.startsWith('~')),
+				excepts = domains.filter(x => x.startsWith('~'));
 			
-			for(var host, ind = 0; ind < domains.length; ind++){
-				host = domains[ind];
-				
-				if(host.startsWith('~') && url.host != host.substr(1))return false;
-			}
+			if(!domains.includes(url.host) || excepts.includes(url.host))return;
 		}
 		
 		// regexing
@@ -268,7 +266,7 @@ module.exports = class {
 								content_type = (resp.headers['content-type'] || '').split(';')[0],
 								type =  content_type == 'text/plain' ? 'plain' : dest == 'font' ? 'font' : decoded.has('type') ? decoded.get('type') : dest == 'script' ? 'js' : (this.mime_ent.find(([ key, val ]) => val.includes(content_type)) || [])[0],
 								dec_headers = this.headers_decode(resp.headers, data);
-										
+							
 							if(this.config.adblock){
 								var matched = adblock_match(url, type);
 								
@@ -342,7 +340,7 @@ module.exports = class {
 						srv.on('message', data => cli.send(data));
 					});
 					
-					srv.on('close', code => cli.close(code));
+					srv.on('close', code => cli.close());
 				});
 			}
 		}/*end_server*/

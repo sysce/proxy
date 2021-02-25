@@ -164,7 +164,7 @@ var rewriter = require('./index.js'),
 		
 		["origin", "protocol", "username", "password", "host", "hostname", "port", "pathname", "search", "hash"].forEach(name => Reflect.defineProperty(HTMLAnchorElement.prototype, name, {
 			get(){
-				console.log(name, new URL(this.href)[name], this.href);
+				// console.log(name, new URL(this.href)[name], this.href);
 				
 				return this.href ? new URL(this.href)[name] : this.href;
 			},
