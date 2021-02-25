@@ -94,7 +94,7 @@ fs.readFileSync(path.join(__dirname, 'easylist.txt'), 'utf8').split('\n').forEac
 	
 	var regex = str.startsWith('/') && str.endsWith('/') ? new RegExp(str.slice(1, -1)) : new RegExp(str.replace(/[\[\]?$()\/\\|.+]/g, char => '\\' + char).replace(/\*/g, '.*?').replace(/\^/g, '([^a-zA-Z0-9_\\-.%]|^|$)'));
 	
-	adblock[exp != -1 ? 'exceptions' : 'filters'].push([ str, regex, options, line ]);
+	adblock[exp ? 'exceptions' : 'filters'].push([ str, regex, options, line ]);
 });
 
 var adblock_match = (url, type) => {
