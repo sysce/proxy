@@ -928,11 +928,12 @@ module.exports = class {
 		
 		var start = url.indexOf(this.config.prefix) + this.config.prefix.length,
 			search_ind = url.indexOf('?'),
-			out
+			out;
 		
 		try{
 			out = new this.URL.searchParams(decodeURIComponent(url.substr(start, search_ind == -1 ? url.length : search_ind)));
 		}catch(err){
+			// console.error(err);
 			out = new this.URL.searchParams();
 		}
 		
