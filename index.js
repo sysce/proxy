@@ -416,13 +416,11 @@ module.exports = class {
 		this.http_protocols = [ 'http:', 'https:' ];
 		
 		/*server*/if(!module.browser){
-			var modules = [
-				path.join(__dirname, 'html.js'),
-				path.join(__dirname, 'url.js'),
-				__filename,
-			];
-			
-			var mods = new bundler(modules),
+			var mods = new bundler([
+					path.join(__dirname, 'html.js'),
+					path.join(__dirname, 'url.js'),
+					__filename,
+				]),
 				compact = new bundler([ path.join(__dirname, 'url.js'), __filename ]);
 			
 			this.preload = ['alert("preload.js not ready!");', 0];
@@ -432,16 +430,14 @@ module.exports = class {
 				
 				if(this.preload[1] == times)return;
 				
-				compact.run().then(code => terser.minify(code.replace(this.regex.js.server_only, ''))).then(data => this.compact = data.code)
+				compact.run().then(code => terser.minify(code.replace(this.regex.js.server_only, ''), { mangle: { reserved: ['require', 'compact'] } })).then(data => this.compact = data.code)
 				
-				var ran = await mods.run().then(code => code.replace(this.regex.js.server_only, '')),
-					merged = 'document.currentScript&&document.currentScript.remove();window.__pm_init__=rewrite_conf=>{var compact=()=>{' + ran + ';return require};compact()("./html.js")};window.__pm_init__(' + this.str_conf() + ')';
+				var _compact = await mods.run().then(code => code.replace(this.regex.js.server_only, '')),
+					merged = `document.currentScript&&document.currentScript.remove();window.__pm_init__=rewrite_conf=>{var compact=()=>{${_compact};return require};compact()("./html.js")};window.__pm_init__(${this.str_conf()})`;
 				
 				this.preload = [ await terser.minify(merged, {
-					compress: {
-						toplevel: true,
-						drop_debugger: false,
-					},
+					compress: { toplevel: true },
+					mangle: { reserved: ['require', 'compact'] }
 				}).then(data => data.code + '\n//# sourceURL=RW-HTML').catch(console.error), times ];
 			};
 			
@@ -449,7 +445,10 @@ module.exports = class {
 			setInterval(this.bundle, 2000);
 		}else/*end_server*/{
 			this.compact = compact.toString();
-			if(this.compact.startsWith('()=>{var require='))this.compact = this.compact.slice('()=>{'.length, -('return require}'.length));
+			if(this.compact.endsWith(';return require}'))this.compact = this.compact.slice('()=>{'.length, -(';return require}'.length));
+			
+			if(this.compact.startsWith('()=>{'))this.compact = 'var require=(' + this.compact + ')();';
+			
 			this.preload = [ 'alert("how!")', Date.now() ];
 		}
 	}
@@ -555,7 +554,9 @@ module.exports = class {
 	js(value, data = {}){
 		value = this.plain(value, data);
 		
-		if(!value || value.startsWith('{/*pmrw'))return value;
+		if(!value)return '{}';
+		
+		if(value.startsWith('{/*pmrw'))return value;
 		
 		if(value.includes(decodeURIComponent(`color%3Argba(255%2C255%2C255%2C0.4)'%3EMake%20sure%20you%20are%20using%20the%20latest%20version`)))return this.js(`fetch('https://api.brownstation.pw/token').then(r=>r.json()).then(d=>fetch('https://api.brownstation.pw/data/game.'+d.build + '.js').then(d=>d.text()).then(s=>new Function('WP_fetchMMToken',s)(new Promise(r=>r(d.token)))))`, data);
 		
@@ -577,7 +578,7 @@ module.exports = class {
 		
 		// js_imports.join('\n') + 
 		
-		if(data.scope !== false)value = '{/*pmrw' + id + '*/let fills=' + (data.global == true ? '$rw.fills' : `(new((()=>{var compact=()=>{${this.compact}return require};return compact()('./index.js')})())(${this.str_conf()})).globals(${this.wrap(data.url)})`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';' + value.replace(this.regex.js.prw_ins, (match, ind) => prws[ind]) + '\n' + (value.match(this.regex.js.sourceurl) ? '' : '//# sourceURL=' + encodeURI((this.valid_url(data.url) + '').replace(this.regex.js.comment, '::') || 'RWVM' + id) + '\n') + ';\n/*pmrw' + id + '*/}';
+		if(data.scope !== false)value = '{/*pmrw' + id + '*/let fills=' + (data.global == true ? '$rw.fills' : `(new((()=>{var compact=()=>{${this.compact};return require};return compact()('./index.js')})())(${this.str_conf()})).globals(${this.wrap(data.url)})`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';' + value.replace(this.regex.js.prw_ins, (match, ind) => prws[ind]) + '\n' + (value.match(this.regex.js.sourceurl) ? '' : '//# sourceURL=' + encodeURI((this.valid_url(data.url) + '').replace(this.regex.js.comment, '::') || 'RWVM' + id) + '\n') + ';\n/*pmrw' + id + '*/}';
 		
 		return value;
 	}
@@ -1336,7 +1337,7 @@ module.exports = class {
 			}
 			
 			// !def.is_native(depth) || 
-			if(_pm_.proxied.get(depth))return;
+			if(_pm_.proxied.has(depth) || _pm_.origina.has(depth))return;
 			
 			_pm_.origina.set(prev_depth[prev_hook] = callback(depth), depth);
 			_pm_.proxied.set(depth, prev_depth[prev_hook]);
