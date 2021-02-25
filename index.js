@@ -1134,7 +1134,7 @@ module.exports = class {
 		
 		var fills = _pm_.fills = {
 			this: def.handler(global, {
-				get: (t, prop, rec, ret) => typeof (ret = Reflect.get(def.has_prop(def.win_binds, prop) ? def.win_binds : global, prop)) == 'function' ? def.assign_func(ret, global) : ret && ret[_pm_.prox] || ret,
+				get: (t, prop, rec, ret) => typeof (ret = Reflect.get(def.has_prop(def.win_binds, prop) ? def.win_binds : global, prop)) == 'function' ? def.assign_func(ret, global) : ret,
 				set: (t, prop, value) => def.has_prop(def.win_binds, prop) ? (def.win_binds[prop] = value) : Reflect.set(global, prop, value),
 			}),
 			doc: def.doc ? def.handler(def.doc, {
@@ -1220,8 +1220,8 @@ module.exports = class {
 				apply: (target, that, args) => Reflect.apply(target, that, [ this.html(args.join(''), def.rw_data({ snippet: true })) ]),
 			}) ],
 			[ 'WebSocket', value => new Proxy(value, {
-				construct: (target, that, [ url, proto ]) => {
-					var ws = Reflect.apply(target, that, [ this.url(url, def.rw_data({ ws: true })), proto ]);
+				construct: (target, [ url, proto ]) => {
+					var ws = Reflect.construct(target, [ this.url(url, def.rw_data({ ws: true })), proto ]);
 					
 					ws.addEventListener('message', event => event.data == 'srv-alive' && event.stopImmediatePropagation() + ws.send('srv-alive') || event.data == 'srv-open' && event.stopImmediatePropagation() + ws.dispatchEvent(new Event('open', { srcElement: ws, target: ws })));
 					
