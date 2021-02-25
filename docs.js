@@ -53,10 +53,6 @@ var nodehttp = require('sys-nodehttp'),
 		codec: rewriter.codec.xor,
 		server: server,
 		title: 'Service',
-		// http_agent: ..,
-		// https_agent: ..,
-		// ruffle: ..,
-		// adblock: ..,
 	});
 
 // [0000] server listening on http://localhost:7080/
@@ -135,6 +131,4 @@ Each property is iterated and in the rewriter a huge array containing informatio
 ### Manifest:
 
 A basic JSON.stringify checking if the key is ${t}src${t} or ${t}key${t} or ${t}start_url${t} and if it is then the rewriters URL handler is used to determine the result.
-`)).then(() => {
-	console.log('finished writing docs, find output at ' + __dirname);
-});
+`)).then(() => console.log('finished writing docs, find output at ' + __dirname));

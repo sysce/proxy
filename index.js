@@ -495,7 +495,7 @@ module.exports = class {
 		if(value.startsWith('blob:') && data.type == 'js' && module.browser){
 			var raw = global.$rw.urls.get(value);
 			
-			if(raw)return (URL.createObjectURL[$rw.orig] || URL.createObjectURL)(new Blob([ this.js(raw, { url: data.base, origin: data.origin }) ]));
+			if(raw)return (global.$rw.origina.get(global.URL.createObjectURL) || global.URL.createObjectURL)(new Blob([ this.js(raw, { url: data.base, origin: data.origin }) ]));
 		}
 		
 		if(value.match(this.regex.url.proto) && !this.protocols.some(proto => value.startsWith(proto)))return value;
