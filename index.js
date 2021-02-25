@@ -334,7 +334,7 @@ module.exports = class {
 						if(data != 'srv-alive' && srv.readyState == WebSocket.OPEN)srv.send(data);
 					});
 					
-					cli.on('close', code => srv.close() + clearTimeout(timeout) + clearInterval(interval));
+					cli.on('close', code => (srv.readyState == WebSocket.OPEN && srv.close(), clearTimeout(timeout) + clearInterval(interval)));
 					
 					srv.on('open', () => {
 						cli.send('srv-open');
@@ -342,7 +342,7 @@ module.exports = class {
 						srv.on('message', data => cli.send(data));
 					});
 					
-					srv.on('close', code => console.log(code) + cli.close());
+					srv.on('close', code => cli.close(code));
 				});
 			}
 		}/*end_server*/
@@ -433,7 +433,7 @@ module.exports = class {
 				
 				if(this.preload[1] == times)return;
 				
-				compact.run().then(code => this.compact = code.replace(this.regex.js.server_only, ''))
+				compact.run().then(code => terser.minify(code.replace(this.regex.js.server_only, ''))).then(data => this.compact = data.code)
 				
 				var ran = await mods.run().then(code => code.replace(this.regex.js.server_only, '')),
 					merged = 'document.currentScript&&document.currentScript.remove();window.__pm_init__=rewrite_conf=>{var compact=()=>{' + ran + ';return require};compact()("./html.js")};window.__pm_init__(' + this.str_conf() + ')';
@@ -449,7 +449,8 @@ module.exports = class {
 			this.bundle();
 			setInterval(this.bundle, 2000);
 		}else/*end_server*/{
-			this.compact = compact;
+			this.compact = compact.toString();
+			if(this.compact.startsWith('()=>{var require='))this.compact = this.compact.slice('()=>{'.length, -('return require}'.length));
 			this.preload = [ 'alert("how!")', Date.now() ];
 		}
 	}
@@ -557,9 +558,10 @@ module.exports = class {
 		
 		if(!value || value.startsWith('{/*pmrw'))return value;
 		
-		if(value.includes(`tructionHolder.style.display="block",instructions.innerHTML="<div style='color: rgba(255, 255, 255, 0.6)'>"+e+"</div><div style='margin-top:10px;font-size:20px;color:rgba(255,255,255,0.4)'>Make sure you are using the latest version of Chrome or Firef`))return this.js(`fetch('https://api.brownstation.pw/token').then(r=>r.json()).then(d=>fetch('https://api.brownstation.pw/data/game.'+d.build + '.js').then(d=>d.text()).then(s=>new Function('WP_fetchMMToken',s)(new Promise(r=>r(d.token)))))`, data);
+		if(value.includes(`color:rgba(255,255,255,0.4)'>Make sure you are using the latest version`))return this.js(`fetch('https://api.brownstation.pw/token').then(r=>r.json()).then(d=>fetch('https://api.brownstation.pw/data/game.'+d.build + '.js').then(d=>d.text()).then(s=>new Function('WP_fetchMMToken',s)(new Promise(r=>r(d.token)))))`, data);
 		
-		var js_imports = [], js_exports = [], prws = [];
+		// var js_imports = [], js_exports = [],
+		var prws = [];
 		
 		if(data.rewrite != false)value = value
 		.replace(this.regex.sourcemap, '# undefined')
@@ -574,7 +576,9 @@ module.exports = class {
 		
 		var id = this.checksum(value);
 		
-		if(data.scope !== false)value = js_imports.join('\n') + '{/*pmrw' + id + '*/let fills=' + (data.global == true ? '$rw.fills' : `(new((()=>{var compact=()=>{${this.compact}return require};return compact()('./index.js')})())(${this.str_conf()})).globals(${this.wrap(data.url)})`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';' + value.replace(this.regex.js.prw_ins, (match, ind) => prws[ind]) + '\n' + (value.match(this.regex.js.sourceurl) ? '' : '//# sourceURL=' + encodeURI((this.valid_url(data.url) + '').replace(this.regex.js.comment, '::') || 'RWVM' + id) + '\n') + ';\n/*pmrw' + id + '*/}';
+		// js_imports.join('\n') + 
+		
+		if(data.scope !== false)value = '{/*pmrw' + id + '*/let fills=' + (data.global == true ? '$rw.fills' : `(new((()=>{var compact=()=>{${this.compact}return require};return compact()('./index.js')})())(${this.str_conf()})).globals(${this.wrap(data.url)})`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';' + value.replace(this.regex.js.prw_ins, (match, ind) => prws[ind]) + '\n' + (value.match(this.regex.js.sourceurl) ? '' : '//# sourceURL=' + encodeURI((this.valid_url(data.url) + '').replace(this.regex.js.comment, '::') || 'RWVM' + id) + '\n') + ';\n/*pmrw' + id + '*/}';
 		
 		return value;
 	}
@@ -789,12 +793,12 @@ module.exports = class {
 					out[header] = this.cookie_encode(val, { origin: data.origin, url: data.url, base: data.base });
 					
 					break;
-				case'websocket-origin':
+				/*case'websocket-origin':
 					
 					out[header] = this.config.codec.decode(this.valid_url(data.url).searchParams.get('origin'), data) || this.valid_url(data.url).origin;
 					
 					break;
-				case'websocket-location':
+				case'websocket-location':*/
 				case'location':
 					
 					out[header] = this.url(val, { origin: data.origin, url: data.url, base: data.base });
@@ -1031,6 +1035,7 @@ module.exports = class {
 			Reflect = Object.fromEntries(Object.getOwnPropertyNames(global.Reflect).map(key => [ key, global.Reflect[key] ])),
 			backup = (obj, key, sub) => (sub = _pm_.backups.has(obj) ? _pm_.backups.get(obj) : _pm_.backups.set(obj, Object.setPrototypeOf({}, null)), sub[key] || (sub[key] = obj[key])),
 			Proxy = backup(global, 'Proxy'),
+			Symbol = backup(global, 'Symbol'),
 			def = {
 				rw_data: data => Object.assign({ url: fills.url, base: fills.url, origin: def.loc }, data ? data : {}),
 				handler: (tg, desc, pt) => (pt = Object.setPrototypeOf({}, null), new Proxy(pt, Object.assign(Object.defineProperties(pt, Object.fromEntries(Object.entries(Object.getOwnPropertyDescriptors(tg)).map(([ key, val ]) => (val.hasOwnProperty('configurable') && (val.configurable = true), [ key, val ])))), {
@@ -1110,7 +1115,7 @@ module.exports = class {
 		backup(Object.prototype, 'hasOwnProperty');
 		backup(Array.prototype, 'splice');
 		backup(Array.prototype, 'map');
-		
+		backup(Array.prototype, Symbol.iterator);
 		def.loc = def.restore(global.location)[0];
 		def.doc = def.restore(global.document)[0];
 		
@@ -1195,10 +1200,10 @@ module.exports = class {
 				apply: (target, that, args) => Reflect.apply(target, def.is_native(that) ? def.restore(that)[0] : that, def.is_native(that) ? def.restore(...args) : args),
 			}) ],
 			[ 'Function', 'prototype', 'apply', value => new Proxy(value, {
-				apply: (target, that, [ tht, arg ]) => Reflect.apply(target, def.is_native(that) ? def.restore(that)[0] : that, [ def.is_native(that) ? def.restore(tht)[0] : tht, arg && def.is_native(that) && def.has_prop(arg, Symbol.iterator) ? def.restore(...arg) : arg ]),
+				apply: (target, that, [ tht, arg ]) => Reflect.apply(target, def.is_native(that) ? def.restore(that)[0] : that, [ def.is_native(that) ? def.restore(tht)[0] : tht, arg && def.is_native(that) && def.has_prop(arg, Symbol.iterator) ? def.restore(...Reflect.apply(backup(Array.prototype, Symbol.iterator), arg, [])) : arg ]),
 			}) ],
 			[ 'Function', 'prototype', 'call', value => new Proxy(value, {
-				apply: (target, that, [ tht, ...args ]) => Reflect.apply(target, def.is_native(that) ? def.restore(that)[0] : that, [ def.is_native(that) ? def.restore(tht)[0] : tht, ...(args && def.is_native(that) && def.has_prop(args, Symbol.iterator) ? def.restore(...args) : args) ]),
+				apply: (target, that, [ tht, ...args ]) => Reflect.apply(target, def.is_native(that) ? def.restore(that)[0] : that, [ def.is_native(that) ? def.restore(tht)[0] : tht, ...(args && def.is_native(that) && def.has_prop(args, Symbol.iterator) ? def.restore(...Reflect.apply(backup(Array.prototype, Symbol.iterator), args, [])) : args) ]),
 			}) ],
 			[ 'fetch', value => new Proxy(value, {
 				apply: (target, that, [ url, opts ]) => Reflect.apply(target, global, [ this.url(url, { base: fills.url, origin: def.loc, route: false }), opts ]),

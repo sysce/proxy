@@ -164,12 +164,14 @@ var rewriter = require('./index.js'),
 		
 		["origin", "protocol", "username", "password", "host", "hostname", "port", "pathname", "search", "hash"].forEach(name => Reflect.defineProperty(HTMLAnchorElement.prototype, name, {
 			get(){
-				var unurl = rw.unurl(this.href, { origin: global.location });
+				console.log(name, new URL(this.href)[name], this.href);
 				
-				return unurl ? new URL(unurl)[name] : null;
+				return this.href ? new URL(this.href)[name] : this.href;
 			},
 			set(v){
-				var curr = new URL(rw.unurl(this.href, { origin: global.location }));
+				if(!this.href)return;
+				
+				var curr = new URL(this.href);
 				
 				curr[name] = v;
 				
