@@ -274,7 +274,7 @@ module.exports = class {
 								type =  content_type == 'text/plain' ? 'plain' : dest == 'font' ? 'font' : decoded.has('type') ? decoded.get('type') : dest == 'script' ? 'js' : (this.mime_ent.find(([ key, val ]) => val.includes(content_type)) || [])[0],
 								dec_headers = this.headers_decode(resp.headers, data);
 							
-							if(this.config.adblock){
+							if(this.config.adblock && !failure){
 								var matched = adblock.match(url, type);
 								
 								if(matched)return res.cgi_status(401, '<pre>EasyList has prevented the following page from loading:\n' + res.sanitize(url.href) + '\n\nBecause of the following filter:\n' + JSON.stringify(matched) + '</pre>');
