@@ -17,21 +17,17 @@ var rewriter = require('./index.js'),
 			return x;
 		},
 		rw_data: data => Object.assign({ url: pm.url, base: pm.url, origin: pm.get_href() }, data ? data : {}),
-		init: global.__pm_init__,
+		init: global.$rw_init,
 		url: $rw.url || ($rw.url = new URL($rw.url || rw.unurl(global.location.href, { origin: global.location }))),
 		unnormal: arg => Array.isArray(arg) ? arg.map(pm.unnormal) : $rw.proxied.get(arg) || arg,
-		frame(win){
+		frame(frame){
 			try{
-				if(win && !win.$rw){
-					win.__pm_init__ = pm.init;
-					
-					new win.Function('(' + pm.init + ')(' + rw.str_conf() + ')')();
-					
-					return win.$rw.fills.this;
-				}
+				if(!frame.$rw)new frame.Function('(' + pm.init + ')(' + rw.str_conf() + ')')();
+				
+				return frame.$rw.proxied.get(frame);
 			}catch(err){
-				console.error(win, err);
-				return { fills: { this: {} } };
+				console.error(frame, err);
+				return null;
 			}
 		},
 	},
@@ -94,10 +90,12 @@ var rewriter = require('./index.js'),
 				return Reflect.apply(org.insertAdjacentHTML.value, this, [ where, is_pm == 'proxied' ? html : rw.html(html, pm.rw_data({ snippet: true })) ]);
 			},
 		})], [ win.HTMLIFrameElement, org => ({
-			set contentWindow(v){return v},
 			get contentWindow(){
 				return pm.frame(Reflect.apply(org.contentWindow.get, this, []));
-			},
+			}
+			get contentDocument(){
+				return (pm.frame(Reflect.apply(org.contentWindow.get, this, [])) || {}).document; 
+			}
 			get srcdoc(){
 				return Reflect.apply(org.srcdoc.get, this, []);
 			},
