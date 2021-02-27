@@ -98,7 +98,7 @@ var rewriter = require('./index.js'),
 			}
 			get srcdoc(){
 				return Reflect.apply(org.srcdoc.get, this, []);
-			},
+			}
 			set srcdoc(v){
 				return Reflect.apply(org.srcdoc.set, this, [ rw.html(v, pm.rw_data()) ]);
 			},
