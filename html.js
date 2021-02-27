@@ -92,13 +92,13 @@ var rewriter = require('./index.js'),
 		})], [ win.HTMLIFrameElement, org => ({
 			get contentWindow(){
 				return pm.frame(Reflect.apply(org.contentWindow.get, this, []));
-			}
+			},
 			get contentDocument(){
 				return (pm.frame(Reflect.apply(org.contentWindow.get, this, [])) || {}).document; 
-			}
+			},
 			get srcdoc(){
 				return Reflect.apply(org.srcdoc.get, this, []);
-			}
+			},
 			set srcdoc(v){
 				return Reflect.apply(org.srcdoc.set, this, [ rw.html(v, pm.rw_data()) ]);
 			},
