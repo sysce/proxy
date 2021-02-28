@@ -105,17 +105,6 @@ var rewriter = require('./index.js'),
 				return Reflect.apply(org.srcdoc.set, this, [ rw.html(v, pm.rw_data()) ]);
 			},
 		}) ], [ win.HTMLElement, org => ({
-			get style(){
-				var style = Reflect.apply(org.style.get, this, []);
-				
-				return new Proxy(style, {
-					get: (target, prop, forgot, ret = Reflect.get(style, prop)) => typeof ret == 'function' ? ret.bind(style) : ret,
-					set: (target, prop, value) => Reflect.set(style, prop, rw.css(value + '', pm.rw_data())),
-				});
-			},
-			set style(v){
-				return Reflect.apply(org.style.set, this, [ rw.css(v, pm.rw_data()) ]);
-			},
 			get ownerDocument(){
 				return $rw.fills.doc;
 			},

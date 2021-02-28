@@ -379,7 +379,7 @@ module.exports = class {
 				sourceurl: /#\s*?sourceURL/gi,
 			},
 			css: {
-				url: /(?<![a-z])(url\s*?\(("|'|))([\s\S]*?)\2\)/gi,
+				url: /(?<![a-z])(url\s*?\()(["']?)([\s\S]*?)\2\)/gi,
 				import: /(@import\s*?(\(|"|'))([\s\S]*?)(\2|\))/gi,
 				property: /(\[)(\w+)(\*?=.*?]|])/g,
 			},
@@ -409,6 +409,7 @@ module.exports = class {
 		this.attr = {
 			html: [ [ 'iframe' ], [ 'srcdoc' ] ],
 			css: [ '*', [ 'style' ] ],
+			css_keys: [ 'background', 'background-image' ],
 			url: [ [ 'track', 'template', 'source', 'script', 'object', 'media', 'link', 'input', 'image', 'video', 'iframe', 'frame', 'form', 'embed', 'base', 'area', 'anchor', 'a', 'img', 'use' ], [ 'srcset', 'href', 'xlink:href', 'src', 'action', 'content', 'data', 'poster' ] ],
 			// js attrs begin with on
 			del: [ '*', ['nonce', 'integrity'] ],
@@ -435,7 +436,7 @@ module.exports = class {
 				
 				if(this.preload[1] == times)return;
 				
-				compact.run().then(code => terser.minify(code.replace(this.regex.js.server_only, ''), { mangle: { reserved: ['require', 'compact'] } })).then(data => this.compact = data.code)
+				compact.run().then(code => terser.minify(code.replace(this.regex.js.server_only, ''), { mangle: { reserved: ['require', 'compact'] } })).then(data => this.compact = data.code).catch(console.error);
 				
 				var _compact = await mods.run().then(code => code.replace(this.regex.js.server_only, '')),
 					merged = `document.currentScript&&document.currentScript.remove();window.$rw_init=rewrite_conf=>{var compact=()=>{${_compact};return require};compact()("./html.js")};window.$rw_init(${this.str_conf()})`;
@@ -602,11 +603,35 @@ module.exports = class {
 		value = value.toString('utf8');
 		
 		[
-			[this.regex.css.url, (m, start, quote = '', url) => start + this.url(url, data) + quote + ')'],
+			[this.regex.css.url, (m, start, quote = '"', url) => start + JSON.stringify(this.url(url, data)) + ')'],
 			[this.regex.sourcemap, '# undefined'],
 			[this.regex.css.import, (m, start, quote, url) => start + this.url(url, data) + quote ],
 			[this.regex.css.property, (m, start, name, end) => start + (this.attr_type(name) == 'url' ? 'data-rw' + name : name) + end ],
 		].forEach(([ reg, val ]) => value = value.replace(reg, val));
+		
+		return value;
+	}
+	/**
+	* Undos CSS rewriting
+	* @param {String} value - CSS code
+	* @param {Object} data - Standard object for all rewriter handlers
+	* @param {Object} data.origin - The page location or URL (eg localhost)
+	* @param {Object} [data.base] - Base URL, default is decoded version of the origin
+	* @param {Object} [data.route] - Adds to the query params if the result should be handled by the rewriter
+	* @returns {String}
+	*/
+	uncss(value, data = {}){
+		if(!value)return '';
+		
+		value = value.toString('utf8');
+		
+		// TODO
+		/*[
+			[this.regex.css.url, (m, start, quote = '', url) => start + this.url(url, data) + quote + ')'],
+			[this.regex.sourcemap, '# undefined'],
+			[this.regex.css.import, (m, start, quote, url) => start + this.url(url, data) + quote ],
+			[this.regex.css.property, (m, start, name, end) => start + (this.attr_type(name) == 'url' ? 'data-rw' + name : name) + end ],
+		].forEach(([ reg, val ]) => value = value.replace(reg, val));*/
 		
 		return value;
 	}
@@ -1318,6 +1343,21 @@ module.exports = class {
 			}) ],
 			[ 'getComputedStyle', value => new Proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, def.restore(that)[0], def.restore(...args)),
+			}) ],
+			// route rewritten props to the hooked function
+			[ 'CSSStyleDeclaration', value => (this.attr.css_keys.forEach(prop => Object.defineProperty(value.prototype, prop, {
+				get(){
+					return this.getProperty(prop);
+				},
+				set(value){
+					return this.setProperty(prop, value);
+				},
+			})), value) ],
+			[ 'CSSStyleDeclaration', 'prototype', 'getProperty', value => new Proxy(value, {
+				apply: (target, that, [ prop, value ]) => this.css(Reflect.apply(target, that, [ prop ])),
+			}) ],
+			[ 'CSSStyleDeclaration', 'prototype', 'setProperty', value => new Proxy(value, {
+				apply: (target, that, [ prop, value ]) => Reflect.apply(target, that, [ prop, this.css(value, def.rw_data({ prop: prop })) ]),
 			}) ],
 			[ 'Document', 'prototype', 'createTreeWalker', value => new Proxy(value, {
 				apply: (target, ...vals) => Reflect.apply(target, ...def.restore(...vals)),
