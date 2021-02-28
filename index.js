@@ -290,7 +290,7 @@ module.exports = class {
 							
 							var body = decoded.get('route') != 'false' && ['js', 'css', 'html', 'plain', 'manifest'].includes(type) ? this[type](body, data) : body;
 							
-							res.compress('br', body);
+							res.send(body);
 						})).on('error', err => {
 							clearTimeout(timeout);
 							
