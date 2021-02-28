@@ -21,8 +21,10 @@ var rewriter = require('./index.js'),
 		url: $rw.url || ($rw.url = new URL($rw.url || rw.unurl(global.location.href, { origin: global.location }))),
 		unnormal: arg => Array.isArray(arg) ? arg.map(pm.unnormal) : $rw.proxied.get(arg) || arg,
 		frame(frame){
+			if(!frame)return frame;
+			
 			try{
-				if(!frame.$rw)new frame.Function('(' + pm.init + ')(' + rw.str_conf() + ')')();
+				if(!frame.$rw)frame.$rw_init = pm.init, new frame.Function('(' + pm.init + ')(' + rw.str_conf() + ')')();
 				
 				return frame.$rw.proxied.get(frame);
 			}catch(err){

@@ -48,7 +48,7 @@ var fs = require('fs'),
 			default:
 				
 				res.cookies.gateway = { value: 'sp' };
-				res.redirect(rw.url(url, { origin: req.url }));
+				res.redirect(rw.url(url, { type: data.type, origin: req.url }));
 				
 				break;
 		}
