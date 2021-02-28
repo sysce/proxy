@@ -1152,7 +1152,7 @@ module.exports = class {
 		
 		var fills = $rw.fills = {
 			this: def.handler(global, {
-				get: (t, prop, rec, ret) => typeof (ret = Reflect.get(def.has_prop(def.win_binds, prop) ? def.win_binds : global, prop)) == 'function' ? def.assign_func(ret, global) : ret,
+				get: (t, prop, rec, ret = Reflect.get(def.has_prop(def.win_binds, prop) ? def.win_binds : global, prop)) => $rw.proxied.get(ret) || typeof ret == 'object' && def.has_prop(ret, '$rw') && ret.$rw.fills.this || (typeof ret == 'function' ? def.assign_func(ret, global) : ret),
 				set: (t, prop, value) => def.has_prop(def.win_binds, prop) ? (def.win_binds[prop] = value) : Reflect.set(global, prop, value),
 			}),
 			doc: def.doc ? def.handler(def.doc, {
@@ -1342,18 +1342,18 @@ module.exports = class {
 				apply: (target, that, [ query ]) => Reflect.apply(target, that, [ this.css(query, def.rw_data()) ]),
 			}) ],
 			[ 'getComputedStyle', value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, def.restore(that)[0], def.restore(...args)),
+				apply: (target, that, args) => Reflect.apply(target, def.restore(that)[0], def.restore(...args).map(x => x instanceof Element ? x : def.doc.body)),
 			}) ],
 			// route rewritten props to the hooked function
 			[ 'CSSStyleDeclaration', value => (this.attr.css_keys.forEach(prop => Object.defineProperty(value.prototype, prop, {
 				get(){
-					return this.getProperty(prop);
+					return this.getPropertyValue(prop);
 				},
 				set(value){
 					return this.setProperty(prop, value);
 				},
 			})), value) ],
-			[ 'CSSStyleDeclaration', 'prototype', 'getProperty', value => new Proxy(value, {
+			[ 'CSSStyleDeclaration', 'prototype', 'getPropertyValue', value => new Proxy(value, {
 				apply: (target, that, [ prop, value ]) => this.css(Reflect.apply(target, that, [ prop ])),
 			}) ],
 			[ 'CSSStyleDeclaration', 'prototype', 'setProperty', value => new Proxy(value, {
