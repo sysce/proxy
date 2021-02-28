@@ -267,7 +267,7 @@ module.exports = class {
 							localAddress: this.config.interface,
 							headers: this.headers_encode(req.headers, data),
 							method: req.method,
-						}, resp => this.decompress(req, resp, body => {
+						}, resp => {
 							var dest = req.headers['sec-fetch-dest'],
 								decoded = this.decode_params(req.url),
 								content_type = (resp.headers['content-type'] || '').split(';')[0],
@@ -288,10 +288,15 @@ module.exports = class {
 							
 							if(failure)return;
 							
-							var body = decoded.get('route') != 'false' && ['js', 'css', 'html', 'plain', 'manifest'].includes(type) ? this[type](body, data) : body;
-							
-							res.send(body);
-						})).on('error', err => {
+							if(decoded.get('route') != 'false' && ['js', 'css', 'html', 'plain', 'manifest'].includes(type))this.decompress(req, resp, body => res.send(this[type](body, data)));
+							else{
+								var encoding = resp.headers['content-encoding'] || resp.headers['x-content-encoding'];
+								
+								if(encoding)res.set('content-encoding', encoding);
+								
+								res.pipe_from(resp);
+							}
+						}).on('error', err => {
 							clearTimeout(timeout);
 							
 							if(failure || res.resp.sent_body)return;
@@ -1312,7 +1317,7 @@ module.exports = class {
 				apply: (target, that, [ query ]) => Reflect.apply(target, that, [ this.css(query, def.rw_data()) ]),
 			}) ],
 			[ 'getComputedStyle', value => new Proxy(value, {
-				apply: (target, ...vals) => Reflect.apply(target, ...def.restore(...vals)),
+				apply: (target, that, args) => Reflect.apply(target, def.restore(that)[0], def.restore(...args)),
 			}) ],
 			[ 'Document', 'prototype', 'createTreeWalker', value => new Proxy(value, {
 				apply: (target, ...vals) => Reflect.apply(target, ...def.restore(...vals)),
