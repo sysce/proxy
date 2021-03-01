@@ -151,8 +151,6 @@ module.exports = class {
 		/*server*/if(this.config.server){
 			if(this.config.dns)dns.setServers(this.config.dns);
 			
-			this.config.server_ssl = this.config.server.ssl;
-			
 			this.config.server.use(this.config.prefix + '*', (req, res) => {
 				if(req.url.searchParams.has('html'))return res.contentType('application/javascript').send(this.preload[0] || '');
 				if(req.url.searchParams.has('favicon'))return res.contentType('image/png').send(Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAA', 'base64'));
@@ -529,7 +527,7 @@ module.exports = class {
 		
 		query.set('ref', this.config.codec.encode(data.base.href, data));
 		
-		var out = (data.ws ? data.origin.replace(this.regex.url.proto, 'ws' + (this.config.server_ssl ? 's' : '') + '://') : data.origin) + this.config.prefix + query;
+		var out = (data.ws ? data.origin.replace(this.regex.url.proto, 'ws' + (data.origin.startsWith('https:') ? 's' : '') + '://') : data.origin) + this.config.prefix + query;
 		
 		if(module.browser && oval instanceof global.Request)out = new global.Request(out, oval);
 		
@@ -1032,8 +1030,6 @@ module.exports = class {
 			codec: this.config.codec.name,
 			prefix: this.config.prefix,
 			title: this.config.title,
-			server_ssl: !!this.config.server_ssl,
-			adblock: this.config.adblock,
 			ws: this.config.ws,
 		});
 	}
@@ -1072,10 +1068,7 @@ module.exports = class {
 			Proxy = backup(global, 'Proxy'),
 			Symbol = backup(global, 'Symbol'),
 			def = {
-				definer: {
-					// $rw.proxied.has(obj) && 
-					apply: (target, that, [ obj, prop, desc ]) => Reflect.apply(target, that, [ obj, prop, ((desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true), desc) ]),
-				},
+				desc: desc => (def.has_prop(desc, 'writable') && (desc.writable = true), def.has_prop(desc, 'configurable') && (desc.configurable = true), desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true, desc),
 				rw_data: data => Object.assign({ url: fills.url, base: fills.url, origin: def.loc }, data ? data : {}),
 				handler: (tg, desc, pt) => (pt = Object.setPrototypeOf({}, null), new Proxy(pt, Object.assign(Object.defineProperties(pt, Object.fromEntries(Object.entries(Object.getOwnPropertyDescriptors(tg)).map(([ key, val ]) => (val.hasOwnProperty('configurable') && (val.configurable = true), [ key, val ])))), {
 					set: (t, prop, value) => Reflect.set(tg, prop, value),
@@ -1275,11 +1268,17 @@ module.exports = class {
 					return ret;
 				},
 			}) ],
-			[ 'Object', 'defineProperty', value => new Proxy(value, def.definer) ],
+			[ 'Object', 'defineProperty', value => new Proxy(value, { apply: (target, that, [ obj, prop, desc ]) => {
+				try{
+					return Reflect.apply(target, that, [ obj, prop, def.desc(desc) ]);
+				}catch(err){
+					console.error(err, '\n', target, that, '\n', obj, prop, desc, '\n', Object.getOwnPropertyDescriptor(obj, prop));
+				}
+			} }) ],
 			[ 'Object', 'defineProperties', value => new Proxy(value, {
-				apply: (target, that, [ obj, descs ]) => (Object.entries(descs).forEach(([ prop, desc ]) => def.definer.apply(Object.defineProperty, Object, [ obj, prop, desc ])), obj),
+				apply: (target, that, [ obj, descs ]) => Reflect.apply(target, that, [ obj, Object.fromEntries(Object.getOwnPropertyNames(descs).map(prop => [ prop, def.desc(descs[prop]) ])) ]),
 			}) ],
-			[ 'Reflect', 'defineProperty', value => new Proxy(value, def.definer) ],
+			[ 'Reflect', 'defineProperty', value => new Proxy(value, { apply: (target, that, [ obj, prop, desc ]) => Reflect.apply(target, that, [ obj, prop, def.desc(desc) ]) }) ],
 			[ 'History', 'prototype', 'pushState', value => new Proxy(value, {
 				apply: (target, that, [ state, title, url ]) => Reflect.apply(target, that, [ state, title, this.url(url, { origin: def.loc, base: fills.url }) ]),
 			}) ],
