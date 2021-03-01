@@ -87,7 +87,7 @@ var fs = require('fs'),
 			
 			var css_ind = str.indexOf('##');
 			
-			if(css_ind != -1)return; // str = str.slice(0, css_ind);
+			if(css_ind != -1)return;
 			
 			var dir_ind = str.indexOf('||');
 			
@@ -1062,11 +1062,16 @@ module.exports = class {
 			global = new (_=>_).constructor('return this')(),
 			URL = this.URL,
 			$rw = this.get_globals(global),
-			backup = (obj, key, sub) => (sub = $rw.backups.has(obj) ? $rw.backups.get(obj) : $rw.backups.set(obj, Object.setPrototypeOf({}, null)), sub[key] || (sub[key] = obj[key])),
+			backup = (obj, key, sub) => (sub = $rw.backups.has(obj) ? $rw.backups.get(obj) : $rw.backups.set(obj, (Object || global.Object).setPrototypeOf({}, null)), sub[key] || (sub[key] = obj[key])),
+			Object = global.Object.fromEntries(global.Object.getOwnPropertyNames(global.Object).map(key => [ key, backup(global.Object, key) ])),
 			Reflect = Object.fromEntries(Object.getOwnPropertyNames(global.Reflect).map(key => [ key, backup(global.Reflect, key) ])),
 			Proxy = backup(global, 'Proxy'),
 			Symbol = backup(global, 'Symbol'),
 			def = {
+				definer: {
+					// $rw.proxied.has(obj) && 
+					apply: (target, that, [ obj, prop, desc ]) => Reflect.apply(target, that, [ obj, prop, ((desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true), desc) ]),
+				},
 				rw_data: data => Object.assign({ url: fills.url, base: fills.url, origin: def.loc }, data ? data : {}),
 				handler: (tg, desc, pt) => (pt = Object.setPrototypeOf({}, null), new Proxy(pt, Object.assign(Object.defineProperties(pt, Object.fromEntries(Object.entries(Object.getOwnPropertyDescriptors(tg)).map(([ key, val ]) => (val.hasOwnProperty('configurable') && (val.configurable = true), [ key, val ])))), {
 					set: (t, prop, value) => Reflect.set(tg, prop, value),
@@ -1266,15 +1271,11 @@ module.exports = class {
 					return ret;
 				},
 			}) ],
-			[ 'Object', 'defineProperty', value => new Proxy(value, {
-				apply: (target, that, [ obj, prop, desc ]) => Reflect.apply(target, that, [ obj, prop, (obj && $rw.proxied.has(obj) && (desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true), desc) ]),
-			}) ],
+			[ 'Object', 'defineProperty', value => new Proxy(value, def.definer) ],
 			[ 'Object', 'defineProperties', value => new Proxy(value, {
-				apply: (target, that, [ obj, descs ]) => Reflect.apply(target, that, [ obj, Object.fromEntries(Object.entries(descs).map(([ prop, desc ]) => [ prop, (obj && $rw.proxied.has(obj) && (desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true), desc) ])) ]),
+				apply: (target, that, [ obj, descs ]) => (Object.entries(descs).forEach(([ prop, desc ]) => def.definer.apply(Object.defineProperty, Object, [ obj, prop, desc ])), obj),
 			}) ],
-			[ 'Reflect', 'defineProperty', value => new Proxy(value, {
-				apply: (target, that, [ obj, prop, desc ]) => Reflect.apply(target, that, [ obj, prop, (obj && $rw.proxied.has(obj) && (desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true), desc) ]),
-			}) ],
+			[ 'Reflect', 'defineProperty', value => new Proxy(value, def.definer) ],
 			[ 'History', 'prototype', 'pushState', value => new Proxy(value, {
 				apply: (target, that, [ state, title, url ]) => Reflect.apply(target, that, [ state, title, this.url(url, { origin: def.loc, base: fills.url }) ]),
 			}) ],
