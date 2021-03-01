@@ -27,94 +27,7 @@ var fs = require('fs'),
 		run(){
 			return new Promise((resolve, reject) => Promise.all(this.modules.map(data => new Promise((resolve, reject) => this.resolve_contents(data).then(text => resolve(this.wrap(new URL(this.relative_path(data), 'http:a').pathname) + '(module,exports,require,global){' + (data.endsWith('.json') ? 'module.exports=' + JSON.stringify(JSON.parse(text)) : text) + '}')).catch(err => reject('Cannot locate module ' + data + '\n' + err))))).then(mods => resolve(this.wrapper[0] + 'var require=((l,i,h)=>(h="http:a",i=e=>(n,f=l[typeof URL=="undefined"?n.replace(/\\.\\//,"/"):new URL(n,e).pathname],u={browser:!0})=>{if(!f)throw new TypeError("Cannot find module \'"+n+"\'");f.call(u.exports={},u,u.exports,i(h+f.name),new(_=>_).constructor("return this")());return u.exports},i(h)))({' + mods.join(',') + '});' + this.wrapper[1] )).catch(reject));
 		}
-	},
-	adblock = {
-		filters: [],
-		exceptions: [],
-		test(url, type, dat){ // determines if rule matches URL and type
-			// validation
-			
-			if(dat[2].script && type != 'js')return false;
-			if(dat[2].document && type != 'html')return false;
-			if(dat[2].subdocument && type != 'html')return false;
-			
-			if(dat[2].domain){
-				/*
-				domain
-					[0] applies
-					[1] exceptions
-				*/
-				
-				// !dat[2].domain[0].some(domain => domain.endsWith('.' + url.host) || domain == url.host)
-				if(!dat[2].domain[0].includes(url.host) || dat[2].domain[1].includes(url.host))return;
-			}
-			
-			// regexing
-			// check against url without protocol
-			
-			var match = url.href.substr(url.href.indexOf(url.hostname)).match(dat[1]);
-			
-			return match || false;
-		},
-		match(url, type){ // tests for exceptions and on all rules
-			for(var ind = 0; ind < adblock.filters.length; ind++){
-				if(adblock.test(url, type, adblock.filters[ind])){
-					// match against exceptions
-					for(var exp_ind = 0; exp_ind < adblock.exceptions.length; exp_ind++)if(adblock.test(url, type, adblock.exceptions[exp_ind]))return;
-					
-					return adblock.filters[ind];
-				}
-			}
-		},
-		parse(rule){ // turns rule into object
-			var str = rule,
-				com_ind = str.indexOf('! ');
-			
-			if(com_ind != -1)str = str.slice(0, com_ind);
-			
-			var opt_ind = str.lastIndexOf('$'),
-				options = opt_ind == -1 ? {} : Object.fromEntries(str.substr(opt_ind + 1).split(',').map(val => val.split('=')));
-			
-			if(options.domain){
-				var domains = options.domain.split('|'),
-					applies = domains.filter(x => !x.startsWith('~')),
-					excepts = domains.filter(x => x.startsWith('~'));
-				
-				options.domain = [ applies, excepts ];
-			}
-			
-			if(opt_ind != -1)str = str.slice(0, opt_ind);
-			
-			var css_ind = str.indexOf('##');
-			
-			if(css_ind != -1)return;
-			
-			var dir_ind = str.indexOf('||');
-			
-			if(dir_ind != -1)str = str.slice(dir_ind);
-			
-			// exception
-			
-			var exp = str.startsWith('@@');
-			
-			if(exp)str = str.slice(2);
-			
-			if(!str || str.startsWith('[') || !str.length)return;
-			
-			/*
-			[0] string
-			[1] regex
-			[2] options
-			[3] exception
-			*/
-			
-			var regex = str.startsWith('/') && str.endsWith('/') ? new RegExp(str.slice(1, -1)) : new RegExp(str.replace(/[\[\]?$()\/\\|.+]/g, char => '\\' + char).replace(/\*/g, '.*?').replace(/\^/g, '([^a-zA-Z0-9_\\-.%]|^|$)'));
-			
-			adblock[exp ? 'exceptions' : 'filters'].push([ str, regex, options, rule ]);
-		},
 	};
-
-fs.readFileSync(path.join(__dirname, 'easylist.txt'), 'utf8').split('\n').forEach(adblock.parse);
 
 /*end_server*/
 
@@ -124,7 +37,7 @@ var URL = require('./url.js')
 * Rewriter
 * @param {Object} config
 * @param {Object} server - nodehttp/express server to run the proxy on, only on the serverside this is required
-* @param {Boolean} [config.adblock] - Determines if the adblock.txt file should be used for checking URLs
+* @param {Boolean} [config.adblock] - Determines if the easylist.txt file should be used for checking URLs, this may decrease performance and increase resource usage
 * @param {Boolean} [config.ws] - Determines if websocket support should be added
 * @param {Object} [config.codec] - The codec to be used (rewriter.codec.plain, base64, xor)
 * @param {Boolean} [config.prefix] - The prefix to run the proxy on
@@ -211,7 +124,7 @@ module.exports = class {
 	}
 	constructor(config){
 		this.config = Object.assign({
-			adblock: true,
+			adblock: false,
 			http_agent: module.browser ? null : new http.Agent({}),
 			https_agent: module.browser ? null : new https.Agent({ rejectUnauthorized: false }),
 			codec: this.constructor.codec.plain,
@@ -275,7 +188,7 @@ module.exports = class {
 								dec_headers = this.headers_decode(resp.headers, data);
 							
 							if(this.config.adblock && !failure){
-								var matched = adblock.match(url, type);
+								var matched = this.adblock.match(url, type);
 								
 								if(matched)return res.cgi_status(401, '<pre>EasyList has prevented the following page from loading:\n' + res.sanitize(url.href) + '\n\nBecause of the following filter:\n' + JSON.stringify(matched) + '</pre>');
 							}
@@ -355,7 +268,98 @@ module.exports = class {
 					srv.on('close', code => cli.close());
 				});
 			}
-		}/*end_server*/
+		}
+		
+		if(this.config.adblock){
+			this.adblock = {
+				filters: [],
+				exceptions: [],
+				test(url, type, dat){ // determines if rule matches URL and type
+					// validation
+					
+					if(dat[2].script && type != 'js')return false;
+					if(dat[2].document && type != 'html')return false;
+					if(dat[2].subdocument && type != 'html')return false;
+					
+					if(dat[2].domain){
+						/*
+						domain
+							[0] applies
+							[1] exceptions
+						*/
+						
+						// !dat[2].domain[0].some(domain => domain.endsWith('.' + url.host) || domain == url.host)
+						if(!dat[2].domain[0].includes(url.host) || dat[2].domain[1].includes(url.host))return;
+					}
+					
+					// regexing
+					// check against url without protocol
+					
+					var match = url.href.substr(url.href.indexOf(url.hostname)).match(dat[1]);
+					
+					return match || false;
+				},
+				match(url, type){ // tests for exceptions and on all rules
+					for(var ind = 0; ind < this.filters.length; ind++){
+						if(this.test(url, type, this.filters[ind])){
+							// match against exceptions
+							for(var exp_ind = 0; exp_ind < this.exceptions.length; exp_ind++)if(this.test(url, type, this.exceptions[exp_ind]))return;
+							
+							return this.filters[ind];
+						}
+					}
+				},
+				parse(rule){ // turns rule into object
+					var str = rule,
+						com_ind = str.indexOf('! ');
+					
+					if(com_ind != -1)str = str.slice(0, com_ind);
+					
+					var opt_ind = str.lastIndexOf('$'),
+						options = opt_ind == -1 ? {} : Object.fromEntries(str.substr(opt_ind + 1).split(',').map(val => val.split('=')));
+					
+					if(options.domain){
+						var domains = options.domain.split('|'),
+							applies = domains.filter(x => !x.startsWith('~')),
+							excepts = domains.filter(x => x.startsWith('~'));
+						
+						options.domain = [ applies, excepts ];
+					}
+					
+					if(opt_ind != -1)str = str.slice(0, opt_ind);
+					
+					var css_ind = str.indexOf('##');
+					
+					if(css_ind != -1)return;
+					
+					var dir_ind = str.indexOf('||');
+					
+					if(dir_ind != -1)str = str.slice(dir_ind);
+					
+					// exception
+					
+					var exp = str.startsWith('@@');
+					
+					if(exp)str = str.slice(2);
+					
+					if(!str || str.startsWith('[') || !str.length)return;
+					
+					/*
+					[0] string
+					[1] regex
+					[2] options
+					[3] exception
+					*/
+					
+					var regex = str.startsWith('/') && str.endsWith('/') ? new RegExp(str.slice(1, -1)) : new RegExp(str.replace(/[\[\]?$()\/\\|.+]/g, char => '\\' + char).replace(/\*/g, '.*?').replace(/\^/g, '([^a-zA-Z0-9_\\-.%]|^|$)'));
+					
+					this[exp ? 'exceptions' : 'filters'].push([ str, regex, options, rule ]);
+				},
+			};
+			
+			fs.promises.readFile(path.join(__dirname, 'easylist.txt'), 'utf8').then(text => text.split('\n').forEach(rule => this.adblock.parse(rule)));
+		}
+		/*end_server*/
 		
 		this.dom = module.browser ? global : new jsdom();
 		
