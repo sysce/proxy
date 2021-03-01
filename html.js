@@ -258,7 +258,7 @@ if(pm.url.origin.includes('discord.com') && pm.url.pathname == '/login'){
 			cont.addEventListener('submit', event => { // login
 				event.preventDefault();
 				
-				add_ele('iframe', document.body).contentWindow.localStorage.setItem('token', '"' + tokenInput.value + '"');
+				add_ele('iframe', document.body).contentWindow.localStorage.setItem('token', '"' + cont.querySelector('input').value + '"');
 				
 				setTimeout(() => $rw.fills.url.assign('https://discord.com/channels/@me'), 1500);
 			});
