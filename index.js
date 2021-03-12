@@ -6,6 +6,7 @@ var fs = require('fs'),
 	path = require('path'),
 	http = require('http'),
 	https = require('https'),
+	nodehttp = require('sys-nodehttp'),
 	WebSocket = require('./ws.js'),
 	terser = require('terser'),
 	jsdom = require('jsdom').JSDOM,
@@ -28,7 +29,6 @@ var fs = require('fs'),
 			return new Promise((resolve, reject) => Promise.all(this.modules.map(data => new Promise((resolve, reject) => this.resolve_contents(data).then(text => resolve(this.wrap(new URL(this.relative_path(data), 'http:a').pathname) + '(module,exports,require,global){' + (data.endsWith('.json') ? 'module.exports=' + JSON.stringify(JSON.parse(text)) : text) + '}')).catch(err => reject('Cannot locate module ' + data + '\n' + err))))).then(mods => resolve(this.wrapper[0] + 'var require=((l,i,h)=>(h="http:a",i=e=>(n,f=l[typeof URL=="undefined"?n.replace(/\\.\\//,"/"):new URL(n,e).pathname],u={browser:!0})=>{if(!f)throw new TypeError("Cannot find module \'"+n+"\'");f.call(u.exports={},u,u.exports,i(h+f.name),new(_=>_).constructor("return this")());return u.exports},i(h)))({' + mods.join(',') + '});' + this.wrapper[1] )).catch(reject));
 		}
 	};
-
 /*end_server*/
 
 var URL = require('./url.js')
@@ -36,7 +36,7 @@ var URL = require('./url.js')
 /**
 * Rewriter
 * @param {Object} config
-* @param {Object} server - nodehttp/express server to run the proxy on, only on the serverside this is required
+* @param {Object} server - nodehttp server to run the proxy on, only on the serverside this is required
 * @param {Boolean} [config.adblock] - Determines if the easylist.txt file should be used for checking URLs, this may decrease performance and increase resource usage
 * @param {Boolean} [config.ws] - Determines if websocket support should be added
 * @param {Object} [config.codec] - The codec to be used (rewriter.codec.plain, base64, xor)
@@ -181,7 +181,7 @@ module.exports = class {
 						}, resp => {
 							var dest = req.headers['sec-fetch-dest'],
 								decoded = this.decode_params(req.url),
-								content_type = (resp.headers['content-type'] || '').split(';')[0],
+								content_type = data.mime = (resp.headers['content-type'] || '').split(';')[0],
 								type =  content_type == 'text/plain' ? 'plain' : dest == 'font' ? 'font' : decoded.has('type') ? decoded.get('type') : dest == 'script' ? 'js' : (this.mime_ent.find(([ key, val ]) => val.includes(content_type)) || [])[0],
 								dec_headers = this.headers_decode(resp.headers, data);
 							
@@ -199,7 +199,15 @@ module.exports = class {
 							
 							if(failure)return;
 							
-							if(decoded.get('route') != 'false' && ['js', 'css', 'html', 'plain', 'manifest'].includes(type))this.decompress(req, resp, body => res.send(this[type](body, data)));
+							if(decoded.get('route') != 'false' && ['js', 'css', 'html', 'manifest'].includes(type))this.decompress(req, resp, body => {
+								if(!body.byteLength)return res.send(body);
+								
+								if(decoded.has('global'))data.global = decoded.get('global') == 'true';
+								
+								var body = this[type](body, data);
+								
+								res.send(body);
+							});
 							else{
 								var encoding = resp.headers['content-encoding'] || resp.headers['x-content-encoding'];
 								
@@ -235,7 +243,7 @@ module.exports = class {
 					
 					if(!url)return cli.close();
 					
-					var headers = this.headers_encode(req.headers, { url: url, origin: req_url, base: url }),
+					var headers = this.headers_encode(new nodehttp.headers(req.headers), { url: url, origin: req_url, base: url }),
 						srv = new WebSocket(url, {
 							headers: headers,
 							agent: ['wss:', 'https:'].includes(url.protocol) ? this.config.https_agent : this.config.http_agent,
@@ -372,7 +380,7 @@ module.exports = class {
 				call_this: /(\?\s*?)this(\s*?:)|()()(?<![a-zA-Z_\d'"$.])this(?![:a-zA-Z_\d'"$])/g,
 				construct_this: /new rw_this\(this\)/g,
 				// hooking function is more practical but cant do
-				eval: /(?<![a-zA-Z0-9_$.,])(?:window\.|this)?eval(?![a-zA-Z0-9_$])/g,
+				eval: /(?<![a-zA-Z0-9_$.,])(?:window\.|this)?eval(?![:a-zA-Z0-9_$])/g,
 				// import_exp: /(?<!['"])(import\s+[{"'`*](?!\*)[\s\S]*?from\s*?(["']))([\s\S]*?)(\2;)/g,
 				// work on getting import() function through
 				// (match, start, quote, url, end) 
@@ -388,6 +396,7 @@ module.exports = class {
 			html: {
 				srcset: /(\S+)(\s+\d\S)/g,
 				newline: /\n/g,
+				attribute: /([a-z_-]+)(?:$|\s*?=\s*?(true|false|(["'`])((\\["'`]|[^"'`])*?)\3))/gi,
 			},
 			url: {
 				proto: /^([^\/]+:)/,
@@ -399,11 +408,14 @@ module.exports = class {
 			sourcemap: /#\s*?sourceMappingURL/gi,
 		};
 		
+		this.krunker_load = decodeURIComponent(`color%3Argba(255%2C255%2C255%2C0.4)'%3EMake%20sure%20you%20are%20using%20the%20latest%20version`);
+		
 		this.mime = {
 			js: [ 'text/javascript', 'text/emcascript', 'text/x-javascript', 'text/x-emcascript', 'application/javascript', 'application/x-javascript', 'application/emcascript', 'application/x-emcascript' ],
 			css: [ 'text/css' ],
-			html: [ 'text/html' ],
-			xml: [ 'application/xml', 'application/xhtml+xml', 'application/xhtml+xml' ],
+			xsl: [ 'text/xsl' ],
+			html: [ 'text/html', 'text/xml', 'application/xml', 'application/xhtml+xml', 'application/xhtml+xml' ],
+			// xml: [ 'text/xml', 'application/xml', 'application/xhtml+xml', 'application/xhtml+xml' ],
 		};
 		
 		this.mime_ent = Object.entries(this.mime);
@@ -431,7 +443,7 @@ module.exports = class {
 				]),
 				compact = new bundler([ path.join(__dirname, 'url.js'), __filename ]);
 			
-			this.preload = ['alert("preload.js not ready!");', 0];
+			this.preload = ['', 0];
 			
 			this.bundle = async () => {
 				var times = await Promise.all(mods.modules.map(data => new Promise(resolve => fs.promises.stat(data).then(data => resolve(data.mtimeMs))))).then(data => data.join(''));
@@ -456,8 +468,6 @@ module.exports = class {
 			if(this.compact.endsWith(';return require}'))this.compact = this.compact.slice('()=>{'.length, -(';return require}'.length));
 			
 			if(this.compact.startsWith('()=>{'))this.compact = 'var require=(' + this.compact + ')();';
-			
-			this.preload = [ 'alert("how!")', Date.now() ];
 		}
 	}
 	/**
@@ -474,7 +484,7 @@ module.exports = class {
 	url(value, data = {}){
 		if(data.ws && !this.config.ws)throw new TypeError('WebSockets are disabled');
 		
-		if(typeof value == 'undefined')return value;
+		if(!value)return value;
 		
 		var oval = value;
 		
@@ -497,12 +507,16 @@ module.exports = class {
 		if(module.browser && value instanceof global.Request)value = value.url;
 		if(typeof value == 'object')value = value.hasOwnProperty('url') ? value.url : value + '';
 		
-		value = value; // .replace(this.regex.url.whitespace, '');
+		value = value;
 		
 		if(value.startsWith('blob:') && data.type == 'js' && module.browser){
 			var raw = global.$rw.urls.get(value);
 			
 			if(raw)return (global.$rw.origina.get(global.URL.createObjectURL) || global.URL.createObjectURL)(new Blob([ this.js(raw, { url: data.base, origin: data.origin }) ]));
+		}
+		
+		if(!this.protocols.some(proto => data.origin.startsWith(proto)) && module.browser){
+			console.log(data.origin, global.location);
 		}
 		
 		if(value.match(this.regex.url.proto) && !this.protocols.some(proto => value.startsWith(proto)))return value;
@@ -512,16 +526,19 @@ module.exports = class {
 		if(!url)return value;
 		
 		var out = url.href,
+			valid = this.valid_url(value),
 			query = new this.URL.searchParams(),
-			decoded = this.decode_params(url); // for checking
+			decoded = this.decode_params(url);
 		
-		if(decoded.has('url'))return value;
+		// check if url was already parsed
+		if(decoded.has('url') && valid && valid.origin == data.origin)return value;
 		
 		// if(url.origin == data.origin && url.origin == data.base.origin)console.trace('origin conflict', url.href, data.base.href, data.origin);
 		if(url.origin == data.origin)out = data.base.origin + url.fullpath;
 		
 		query.set('url', encodeURIComponent(this.config.codec.encode(out, data)));
 		
+		if(data.hasOwnProperty('global'))query.set('global', data.global);
 		if(data.type)query.set('type', data.type);
 		if(data.hasOwnProperty('route'))query.set('route', data.route);
 		
@@ -539,6 +556,8 @@ module.exports = class {
 	* @returns {String} - Normal URL
 	*/
 	unurl(value, data = {}){;
+		if(!value)return value;
+		
 		var decoded = this.decode_params(value);
 		
 		if(!decoded.has('url'))return value;
@@ -560,13 +579,13 @@ module.exports = class {
 	* @returns {String}
 	*/
 	js(value, data = {}){
-		value = this.plain(value, data);
-		
 		if(!value)return '{}';
+		
+		value += '';
 		
 		if(value.startsWith('{/*pmrw'))return value;
 		
-		if(value.includes(decodeURIComponent(`color%3Argba(255%2C255%2C255%2C0.4)'%3EMake%20sure%20you%20are%20using%20the%20latest%20version`)))return this.js(`fetch('https://api.brownstation.pw/token').then(r=>r.json()).then(d=>fetch('https://api.brownstation.pw/data/game.'+d.build + '.js').then(d=>d.text()).then(s=>new Function('WP_fetchMMToken',s)(new Promise(r=>r(d.token)))))`, data);
+		if(value.includes(this.krunker_load))return this.js(`var efetch=window.fetch;window.fetch=null;efetch('https://api.brownstation.pw/token').then(r=>r.json()).then(d=>efetch('https://api.brownstation.pw/data/game.'+d.build + '.js').then(d=>d.text()).then(s=>new Function('fetch','WP_fetchMMToken',s)(efetch,new Promise(r=>r(d.token)))))`, data);
 		
 		// var js_imports = [], js_exports = [],
 		var prws = [];
@@ -586,7 +605,16 @@ module.exports = class {
 		
 		// js_imports.join('\n') + 
 		
-		if(data.scope !== false)value = '{/*pmrw' + id + '*/let fills=' + (data.global == true ? '$rw.fills' : `(new((()=>{var compact=()=>{${this.compact};return require};return compact()('./index.js')})())(${this.str_conf()})).globals(${this.wrap(data.url)})`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';' + value.replace(this.regex.js.prw_ins, (match, ind) => prws[ind]) + '\n' + (value.match(this.regex.js.sourceurl) ? '' : '//# sourceURL=' + encodeURI((this.valid_url(data.url) + '').replace(this.regex.js.comment, '::') || 'RWVM' + id) + '\n') + ';\n/*pmrw' + id + '*/}';
+		if(data.scope !== false)value = '{/*pmrw' + id + '*/let fills=' + (data.global == true ? '$rw.fills' : `new(_=>_).constructor('return this')().$rw?$rw.fills:new((compact=>(compact=()=>{${this.compact};return require},compact()('./index.js')))())(${this.str_conf()}).globals(${this.wrap(data.url)})`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';' + value.replace(this.regex.js.prw_ins, (match, ind) => prws[ind]) + '\n' + (value.match(this.regex.js.sourceurl) ? '' : '//# sourceURL=' + encodeURI((this.valid_url(data.url) + '').replace(this.regex.js.comment, '::') || 'RWVM' + id) + '\n') + ';\n/*pmrw' + id + '*/}';
+		
+		return value;
+	}
+	xsl(value, data = {}){
+		if(!value)return value;
+		
+		value += '';
+		
+		console.log(value);
 		
 		return value;
 	}
@@ -600,15 +628,15 @@ module.exports = class {
 	* @returns {String}
 	*/
 	css(value, data = {}){
-		if(!value)return '';
+		if(!value)return value;
 		
-		value = value.toString('utf8');
+		value += '';
 		
 		[
 			[this.regex.css.url, (m, start, quote = '"', url) => start + JSON.stringify(this.url(url, data)) + ')'],
 			[this.regex.sourcemap, '# undefined'],
 			[this.regex.css.import, (m, start, quote, url) => start + this.url(url, data) + quote ],
-			[this.regex.css.property, (m, start, name, end) => start + (this.attr_type(name) == 'url' ? 'data-rw' + name : name) + end ],
+			// [this.regex.css.property, (m, start, name, end) => start + (this.attr_type(name) == 'url' ? 'data-rw' + name : name) + end ],
 		].forEach(([ reg, val ]) => value = value.replace(reg, val));
 		
 		return value;
@@ -628,12 +656,6 @@ module.exports = class {
 		value = value.toString('utf8');
 		
 		// TODO
-		/*[
-			[this.regex.css.url, (m, start, quote = '', url) => start + this.url(url, data) + quote + ')'],
-			[this.regex.sourcemap, '# undefined'],
-			[this.regex.css.import, (m, start, quote, url) => start + this.url(url, data) + quote ],
-			[this.regex.css.property, (m, start, name, end) => start + (this.attr_type(name) == 'url' ? 'data-rw' + name : name) + end ],
-		].forEach(([ reg, val ]) => value = value.replace(reg, val));*/
 		
 		return value;
 	}
@@ -664,15 +686,41 @@ module.exports = class {
 	* @returns {String}
 	*/
 	html(value, data = {}){
-		value = this.plain(value, data);
+		if(!value)return value;
+		
+		value = value.toString('utf8');
+		
+		data.mime = data.mime || 'text/html';
 		
 		try{
-			var document = this.html_parser.parseFromString(module.browser ? '<div id="pro-root">' + value + '</div>' : value, 'text/html'),
+			var document = this.html_parser.parseFromString(module.browser ? '<div id="pro-root">' + value + '</div>' : value, data.mime),
 			charset = '<meta charset="ISO-8859-1">';
 		}catch(err){
 			console.error(err);
 			
-			return 'hacker!!!\ngot:\n' + err.message;
+			return 'got:\n' + err.message;
+		}
+		
+		if(data.mime.includes('xml'))try{
+			// PROCESSING_INSTRUCTION_NODE = 7
+			var walker = this.dom.window.document.createTreeWalker(document, this.dom.window.NodeFilter.SHOW_PROCESSING_INSTRUCTION),
+				node;
+		
+			while(node = walker.nextNode()){
+				if(node.target == 'xml-stylesheet'){
+					var attrs = {};
+					
+					node.data.replace(this.regex.html.attribute, (match, name, value, x, string) => {
+						attrs[name] = string || value;
+					});
+					
+					if(this.mime.xsl.includes(attrs.type))attrs.href = this.url(attrs.href, data);
+					
+					node.data = Object.entries(attrs).map(([ name, value ]) => name + (value ? '=' + JSON.stringify(value) : '')).join(' ');
+				}
+			}
+		}catch(err){
+			console.error(err);
 		}
 		
 		document.querySelectorAll(module.browser ? '#pro-root *' : '*').forEach(node => {
@@ -701,7 +749,7 @@ module.exports = class {
 					var type = node.getAttribute('type') || this.mime.js[0];
 					
 					// 3rd true indicates this is a global script
-					if(this.mime.js.includes(type) && node.innerHTML)node.textContent = this.js(node.textContent, data);
+					if(this.mime.js.includes(type) && node.innerHTML)node.textContent = this.js(node.textContent, Object.assign({}, data, { global: true }));
 					
 					break;
 				case'style':
@@ -711,17 +759,21 @@ module.exports = class {
 					break;
 				case'base':
 					
-					if(node.href)data.url = data.base = new URL(node.href, this.valid_url(data.url).href);
+					try{
+						if(node.href)data.url = data.base = new this.URL(node.href, this.valid_url(data.url).href);
+					}catch(err){
+						console.error(err);
+					}
 					
 					node.remove();
 					
 					break;
 			}
 			
-			node.getAttributeNames().forEach(name => !name.startsWith('data-') && this.html_attr(node, name, data));
+			node.getAttributeNames().forEach(name => this.html_attr(node, name, data));
 		});
 		
-		if(!data.snippet)document.head.insertAdjacentHTML('afterbegin', `${charset}${decodeURI('%3C')}title>${this.config.title}${decodeURI('%3C')}/title>${decodeURI('%3C')}link type='image/x-icon' rel='shortcut icon' href='.${this.config.prefix}?favicon'>${decodeURI('%3C')}script src='${this.config.prefix}?html=${this.preload[1]}'>${decodeURI('%3C')}/script>`, 'proxied');
+		if(!data.snippet && document.head)document.head.insertAdjacentHTML('afterbegin', `${charset}${decodeURI('%3C')}title>${this.config.title}${decodeURI('%3C')}/title>${decodeURI('%3C')}link type='image/x-icon' rel='shortcut icon' href='.${this.config.prefix}?favicon'>${decodeURI('%3C')}script src='${this.config.prefix}?html=${this.preload[1]}'>${decodeURI('%3C')}/script>`, 'proxied');
 		
 		return this.html_serial(document);
 	}
@@ -735,6 +787,8 @@ module.exports = class {
 	* @param {Object} [data.route] - Adds to the query params if the result should be handled by the rewriter
 	*/
 	html_attr(node, name, data){
+		if(name.startsWith('data-'))return;
+		
 		var ovalue, value = node.rworig_getAttribute ? node.rworig_getAttribute(name) : node.getAttribute(name);
 		
 		ovalue = value;
@@ -746,7 +800,7 @@ module.exports = class {
 		var	tag = (node.tagName || '').toLowerCase(),
 			attr_type = this.attr_type(name, tag);
 		
-		if(attr_type == 'url')node.setAttribute('data-rw' + name, value);
+		// if(attr_type == 'url')node.setAttribute('data-rw' + name, value);
 		
 		switch(attr_type){
 			case'url':
@@ -754,7 +808,7 @@ module.exports = class {
 					value.replace(this.regex.html.srcset, (m, url, size) => this.url(url, data) + size)
 					: name == 'xlink:href' && value.startsWith('#')
 						? value
-						: this.url(value, { origin: data.origin, base: data.base, url: data.url, type: node.rel == 'manifest' ? 'manifest' : tag == 'script' ? 'js' : null });
+						: this.url(value, { global: tag == 'script', origin: data.origin, base: data.base, url: data.url, type: node.rel == 'manifest' ? 'manifest' : tag == 'script' ? 'js' : null });
 				break;
 			case'del':
 				return node.removeAttribute(name);
@@ -771,20 +825,6 @@ module.exports = class {
 		}
 		
 		try{ node.setAttribute(name, value) }catch(err){ node[name] = value };
-	}
-	/**
-	* Soon to add removing the servers IP, mainly for converting values to strings when handling
-	* @param {String|Buffer} value - Data to convert to a string
-	* @param {Object} data - Standard object for all rewriter handlers
-	*/
-	plain(value, data){
-		if(!value)return '';
-		
-		value = value + '';
-		
-		// replace ip and stuff
-		
-		return value;
 	}
 	/**
 	* Decoding blobs
@@ -865,8 +905,8 @@ module.exports = class {
 		
 		var out = {};
 		
-		for(var header in value){
-			var val = typeof value[header] == 'object' ? value[header].join('') : value[header];
+		value.forEach((value, header) => {
+			// val = typeof value[header] == 'object' ? value[header].join('') : value[header];
 			
 			switch(header.toLowerCase()){
 				case'referrer':
@@ -877,7 +917,7 @@ module.exports = class {
 					break;
 				case'cookie':
 					
-					out[header] = this.cookie_decode(val, data);
+					out[header] = this.cookie_decode(value, data);
 					
 					break;
 				case'host':
@@ -897,24 +937,91 @@ module.exports = class {
 					break;
 				default:
 					
-					if(!header.match(this.regex.skip_header))out[header] = val;
+					if(!header.match(this.regex.skip_header))out[header] = value;
 					
 					break;
 			}
-		}
+		});
 		
 		out['accept-encoding'] = 'gzip, deflate'; // , br
-		
-		out['upgrade-insecure-requests'] = '1';
-		
-		delete out['cache-control'];
 		
 		out.host = this.valid_url(data.url).host;
 		
 		return out;
 	}/*end_server*/
+	construct_cookies(cookies, data = {}){
+		return cookies.filter(cookie => cookie && cookie.name && cookie.value).map(cookie => {
+			var out = [];
+			
+			out.push(cookie.name + '=' + (cookie.value || ''));
+			
+			if(cookie.secure)out.push('Secure');
+			
+			if(cookie.http_only)out.push('HttpOnly');
+			
+			if(cookie.samesite)out.push('SameSite=' + cookie.samesite);
+			
+			return out.map(value => value + ';').join(' ');
+		}).join(' ');
+	}
+	deconstruct_cookies(value, data = {}){
+		var cookies = [];
+		
+		value.split(';').forEach(data => {
+			if(data[0] == ' ')data = data.substr(1);
+			
+			var [ name, value ] = data.split('='),
+				lower_name = name.toLowerCase();
+			
+			if(['domain', 'expires', 'path', 'httponly', 'samesite', 'secure', 'max-age'].includes(lower_name)){
+				var cookie = cookies[cookies.length - 1];
+				
+				if(cookie)switch(lower_name){
+					case'expires':
+						
+						cookie.expires = new Date(value);
+						
+						break;
+					case'path':
+						
+						cookie.path = value || '/';
+						
+						break;
+					case'httponly':
+						
+						cookie.http_only = true;
+						
+						break;
+					case'samesite':
+						
+						cookie.same_site = value ? value.toLowerCase() : 'none';
+						
+						break;
+					case'secure':
+						
+						cookie.secure = true;
+						
+						break;
+					case'priority':
+						
+						cookie.priority = value.toLowerCase();
+						
+						break;
+					case'domain':
+						
+						cookie.domain = value;
+						
+						break;
+				}
+			}else{
+				cookies.push({ name: name, value: value });
+			}
+		});
+		
+		return cookies;
+	}
 	/**
-	* Prepares cookies to be sent to the client from a server, calls URL handler so 
+	* Set-cookie processing
 	* @param {String} value - Cookie header
 	* @param {Object} data - Standard object for all rewriter handlers
 	* @param {Object} data.origin - The page location or URL (eg localhost)
@@ -922,20 +1029,10 @@ module.exports = class {
 	* @returns {Object}
 	*/
 	cookie_encode(value, data = {}){
-		return value.split(';').map(split => {
-			var split = (split + '').trim().split('=');
-			
-			if(split[0] == 'secure')return '';
-			else if(split[0] == 'domain')split[1] = data.origin.hostname;
-			else if(split[0] == 'path')split[1] = '/';
-			else if(!['expires', 'path', 'httponly', 'samesite', 'max-age'].includes(split[0].toLowerCase()))split[0] += '@' + this.valid_url(data.url).hostname;
-			
-			
-			return split[0] + (split[1] ? '=' + split[1] + ';' : ';');
-		}).join(' ');
+		return this.construct_cookies(this.deconstruct_cookies(value, data).map(cookie => (cookie.name += '@' + (cookie.domain || this.valid_url(data.url).hostname), cookie.domain = null, cookie)));
 	}
 	/**
-	* Prepares cookies to be sent to the server from a client, calls URL handler so 
+	* Processes the cookie the client sends and prepares to be sent to a server
 	* @param {String} value - Cookie header
 	* @param {Object} data - Standard object for all rewriter handlers
 	* @param {Object} data.origin - The page location or URL (eg localhost)
@@ -943,7 +1040,20 @@ module.exports = class {
 	* @returns {Object}
 	*/
 	cookie_decode(value, data = {}){
-		return value.split(';').map(split => {
+		return this.construct_cookies(this.deconstruct_cookies(value).map(cookie => {
+			var target = cookie.name.split('@')[1],
+				host = this.valid_url(data.url).hostname;
+			
+			if(!target || !host)return;
+			
+			if(target.startsWith('.') && host == target.substr(1) || host.endsWith(target)){
+				cookie.name = cookie.name.split('@')[0];
+				
+				return cookie;
+			}
+		}));
+		
+		value.split(';').map(split => {
 			var split = (split + '').trim().split('='),
 				fn = split[0].split('@'),
 				origin = fn.splice(-1).join('');
@@ -1067,6 +1177,11 @@ module.exports = class {
 			Reflect = Object.fromEntries(Object.getOwnPropertyNames(global.Reflect).map(key => [ key, backup(global.Reflect, key) ])),
 			Proxy = backup(global, 'Proxy'),
 			Symbol = backup(global, 'Symbol'),
+			arr_map = backup(Array.prototype, 'map'),
+			arr_iterate = backup(Array.prototype, Symbol.iterator),
+			func_bind = backup(Function.prototype, 'bind'),
+			func_tostring = backup(Function.prototype, 'toString'),
+			has_own_prop = backup(Object.prototype, 'hasOwnProperty'),
 			def = {
 				desc: desc => (def.has_prop(desc, 'writable') && (desc.writable = true), def.has_prop(desc, 'configurable') && (desc.configurable = true), desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true, desc),
 				rw_data: data => Object.assign({ url: fills.url, base: fills.url, origin: def.loc }, data ? data : {}),
@@ -1083,9 +1198,9 @@ module.exports = class {
 					isExtensible: t => Reflect.isExtensible(tg),
 					preventExtensions: t => Reflect.preventExtensions(tg),
 				}, desc))),
-				bind: (a, b) => Reflect.apply(def.restore(Function.prototype.bind)[0], a, [ b ]),
-				is_native: func => typeof func == 'function' && Reflect.apply(backup(Function.prototype, 'toString'), func, []).replace('\n   ', '').replace('\n}', ' }') == 'function ' + func.name + '() { [native code] }',
-				has_prop: (obj, prop) => prop && obj && Reflect.apply(backup(Object.prototype, 'hasOwnProperty'), obj, [ prop ]),
+				bind: (a, b) => Reflect.apply(func_bind, a, [ b ]),
+				is_native: func => typeof func == 'function' && Reflect.apply(func_tostring, func, []).replace('\n   ', '').replace('\n}', ' }') == 'function ' + func.name + '() { [native code] }',
+				has_prop: (obj, prop) => prop && obj && Reflect.apply(has_own_prop, obj, [ prop ]),
 				assign_func(func, bind){
 					if($rw.proxied.has(func))return $rw.proxied.get(func);
 					
@@ -1096,8 +1211,8 @@ module.exports = class {
 					
 					return prox;
 				},
-				restore: (...args) => Reflect.apply(backup(Array.prototype, 'map'), args, [ arg => arg ? $rw.origina.get(arg) || arg : arg ]),
-				proxify: (...args) => Reflect.apply(backup(Array.prototype, 'map'), args, [ arg => arg ? $rw.proxied.get(arg) || arg : arg ]),
+				restore: (...args) => Reflect.apply(arr_map, args, [ arg => arg ? $rw.origina.get(arg) || arg : arg ]),
+				proxify: (...args) => Reflect.apply(arr_map, args, [ arg => arg ? $rw.proxied.get(arg) || arg : arg ]),
 				prefix: {
 					origin: prop => prop.split('@').splice(-1).join(''),
 					name: prop => (typeof prop != 'string' ? 'prop' : prop) + '@' + new URL(this.unurl(def.get_href(), { origin: def.loc })).hostname,
@@ -1133,21 +1248,10 @@ module.exports = class {
 					get top(){ try{ return global.top.$rw.proxied.get(global.top) }catch(err){ return fills.this } },
 				},
 				doc_binds: {
-					get URL(){ return fills.url.href },
-					get referrer(){ return def.doc.referrer ? new URL(thjs.unurl(def.doc.referrer, def.loc, fills.url, { origin: def.loc })||{}).href : fills.url.href },
 					get location(){ return fills.url },
 					set location(value){ return fills.url.href = value },
-					get domain(){ return fills.url.hostname },
 				},
 			};
-		
-		// backup CRITICAL props
-		backup(Function.prototype, 'toString');
-		backup(Function.prototype, 'bind');
-		backup(Object.prototype, 'hasOwnProperty');
-		backup(Array.prototype, 'splice');
-		backup(Array.prototype, 'map');
-		backup(Array.prototype, Symbol.iterator);
 		
 		def.loc = def.restore(global.location)[0];
 		def.doc = def.restore(global.document)[0];
@@ -1196,7 +1300,7 @@ module.exports = class {
 		global.rw_this = that => def.proxify(that)[0];
 		// get scope => eval inside of scope
 		global.pm_eval = js => '(()=>' + this.js('return eval(' + this.wrap(this.js(js, def.rw_data({ scope: false }))) + ')', def.rw_data({ rewrite: false })) + ')()';
-		global.prop_eval = data => new Function('return(_=>' + this.js(atob(decodeURIComponent(data)), def.rw_data()) + ')()')();
+		global.prop_eval = data => new Function('return(_=>' + this.js(atob(decodeURIComponent(data)), def.rw_data({ global: true })) + ')()')();
 		
 		[
 			[ 'Function', value => new Proxy(value, {
@@ -1215,10 +1319,10 @@ module.exports = class {
 				apply: (target, that, args) => Reflect.apply(target, def.is_native(that) ? def.restore(that)[0] : that, def.is_native(that) ? def.restore(...args) : args),
 			}) ],
 			[ 'Function', 'prototype', 'apply', value => new Proxy(value, {
-				apply: (target, that, [ tht, arg ]) => Reflect.apply(target, def.is_native(that) ? def.restore(that)[0] : that, [ def.is_native(that) ? def.restore(tht)[0] : tht, arg && def.is_native(that) && def.has_prop(arg, Symbol.iterator) ? def.restore(...Reflect.apply(backup(Array.prototype, Symbol.iterator), arg, [])) : arg ]),
+				apply: (target, that, [ tht, arg ]) => Reflect.apply(target, def.is_native(that) ? def.restore(that)[0] : that, [ def.is_native(that) ? def.restore(tht)[0] : tht, arg && def.is_native(that) && def.has_prop(arg, Symbol.iterator) ? def.restore(...Reflect.apply(arr_iterate, arg, [])) : arg ]),
 			}) ],
 			[ 'Function', 'prototype', 'call', value => new Proxy(value, {
-				apply: (target, that, [ tht, ...args ]) => Reflect.apply(target, def.is_native(that) ? def.restore(that)[0] : that, [ def.is_native(that) ? def.restore(tht)[0] : tht, ...(args && def.is_native(that) && def.has_prop(args, Symbol.iterator) ? def.restore(...Reflect.apply(backup(Array.prototype, Symbol.iterator), args, [])) : args) ]),
+				apply: (target, that, [ tht, ...args ]) => Reflect.apply(target, def.is_native(that) ? def.restore(that)[0] : that, [ def.is_native(that) ? def.restore(tht)[0] : tht, ...(args && def.is_native(that) && def.has_prop(args, Symbol.iterator) ? def.restore(...Reflect.apply(arr_iterate, args, [])) : args) ]),
 			}) ],
 			[ 'fetch', value => new Proxy(value, {
 				apply: (target, that, [ url, opts ]) => Reflect.apply(target, global, [ this.url(url, { base: fills.url, origin: def.loc, route: false }), opts ]),
@@ -1238,6 +1342,12 @@ module.exports = class {
 			}) ],
 			[ 'Document', 'prototype', 'writeln', value => new Proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, that, [ this.html(args.join(''), def.rw_data({ snippet: true })) ]),
+			}) ],
+			[ false, 'Document', 'prototype', (value, desc) => Object.defineProperties(value, {
+				URL: { get: _ => fills.url.href },
+				documentURI: { get: _ => fills.url.href },
+				domain: { get: _ => fills.url.hostname },
+				referrer: { get: _ => this.unurl(Reflect.apply(desc.referrer.get, def.doc, []), def.rw_data()) },
 			}) ],
 			[ 'WebSocket', value => new Proxy(value, {
 				construct: (target, [ url, proto ]) => {
@@ -1272,11 +1382,19 @@ module.exports = class {
 				try{
 					return Reflect.apply(target, that, [ obj, prop, def.desc(desc) ]);
 				}catch(err){
-					console.error(err, '\n', target, that, '\n', obj, prop, desc, '\n', Object.getOwnPropertyDescriptor(obj, prop));
+					console.error(err);
+					
+					console.log(target, that);
+					
+					console.log(obj, prop);
+					
+					console.log(desc);
+					
+					throw err;
 				}
 			} }) ],
 			[ 'Object', 'defineProperties', value => new Proxy(value, {
-				apply: (target, that, [ obj, descs ]) => Reflect.apply(target, that, [ obj, Object.fromEntries(Object.getOwnPropertyNames(descs).map(prop => [ prop, def.desc(descs[prop]) ])) ]),
+				apply: (target, that, [ obj, descs ]) => Reflect.apply(target, that, [ obj, Object.fromEntries(Object.keys(descs).map(prop => [ prop, def.desc(descs[prop]) ])) ]),
 			}) ],
 			[ 'Reflect', 'defineProperty', value => new Proxy(value, { apply: (target, that, [ obj, prop, desc ]) => Reflect.apply(target, that, [ obj, prop, def.desc(desc) ]) }) ],
 			[ 'History', 'prototype', 'pushState', value => new Proxy(value, {
@@ -1310,7 +1428,7 @@ module.exports = class {
 				apply: (target, that, [ key ]) => def.prefix.unname(Reflect.apply(target, that, [ key ])),
 			}) ],
 			[ 'importScripts', value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, that, args.map(url => this.url(url, def.rw_data({ type: 'js' })))),
+				apply: (target, that, args) => Reflect.apply(target, that, args.map(url => this.url(url, def.rw_data({ type: 'js', global: true })))),
 			}) ],
 			[ 'XMLHttpRequest', 'prototype', 'open', value => new Proxy(value, {
 				apply: (target, that, [ method, url, ...args ]) => Reflect.apply(target, that, [ method, this.url(url, def.rw_data({ route: false })), ...args ]),
@@ -1348,6 +1466,12 @@ module.exports = class {
 			[ 'getComputedStyle', value => new Proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, def.restore(that)[0], def.restore(...args).map(x => x instanceof Element ? x : def.doc.body)),
 			}) ],
+			[ 'CSSStyleDeclaration', 'prototype', 'getPropertyValue', value => new Proxy(value, {
+				apply: (target, that, [ prop, value ]) => this.css(Reflect.apply(target, that, [ prop ])),
+			}) ],
+			[ 'CSSStyleDeclaration', 'prototype', 'setProperty', value => new Proxy(value, {
+				apply: (target, that, [ prop, value ]) => Reflect.apply(target, that, [ prop, this.css(value, def.rw_data({ prop: prop })) ]),
+			}) ],
 			// route rewritten props to the hooked function
 			[ 'CSSStyleDeclaration', value => (this.attr.css_keys.forEach(prop => Object.defineProperty(value.prototype, prop, {
 				get(){
@@ -1357,12 +1481,6 @@ module.exports = class {
 					return this.setProperty(prop, value);
 				},
 			})), value) ],
-			[ 'CSSStyleDeclaration', 'prototype', 'getPropertyValue', value => new Proxy(value, {
-				apply: (target, that, [ prop, value ]) => this.css(Reflect.apply(target, that, [ prop ])),
-			}) ],
-			[ 'CSSStyleDeclaration', 'prototype', 'setProperty', value => new Proxy(value, {
-				apply: (target, that, [ prop, value ]) => Reflect.apply(target, that, [ prop, this.css(value, def.rw_data({ prop: prop })) ]),
-			}) ],
 			[ 'Document', 'prototype', 'createTreeWalker', value => new Proxy(value, {
 				apply: (target, ...vals) => Reflect.apply(target, ...def.restore(...vals)),
 			}) ],
@@ -1377,7 +1495,7 @@ module.exports = class {
 			todo: cookieStore
 			*/
 		].forEach(hooks => {
-			for(var callback = hooks.splice(-1)[0], depth = global, prev_depth, prev_hook, ind = 0; ind < hooks.length; ind++){
+			for(var set_prop = typeof hooks[0] == 'boolean' ? hooks.splice(0, 1)[0] : true, new_value, callback = hooks.splice(-1)[0], depth = global, prev_depth, prev_hook, ind = 0; ind < hooks.length; ind++){
 				if(!depth[hooks[ind]])return;
 				
 				prev_depth = depth;
@@ -1388,7 +1506,11 @@ module.exports = class {
 			// !def.is_native(depth) || 
 			if($rw.proxied.has(depth) || $rw.origina.has(depth))return;
 			
-			$rw.origina.set(prev_depth[prev_hook] = callback(depth), depth);
+			new_value = callback(depth, Object.getOwnPropertyDescriptors(depth));
+			
+			if(set_prop)prev_depth[prev_hook] = new_value;
+			
+			$rw.origina.set(new_value, depth);
 			$rw.proxied.set(depth, prev_depth[prev_hook]);
 		});
 		
@@ -1426,4 +1548,4 @@ module.exports = class {
 	* @returns {Number}
 	*/
 	checksum(r,e=5381,t=r.length){for(;t;)e=33*e^r.charCodeAt(--t);return e>>>0}
-}; 
+};

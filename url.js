@@ -1,7 +1,7 @@
 'use strict';
 
 module.exports = /*global.URL ? Object.assign(class extends global.URL {}, { searchParams: URLSearchParams }) :*/ (() => {
-	var relative = Object.create(null);
+	var invalid = () => {}, relative = Object.create(null);
 	relative.ftp = 21, relative.file = 0, relative.gopher = 70, relative.http = 80
 		, relative.https = 443, relative.ws = 80, relative.wss = 443;
 	var relativePathDotMapping = Object.create(null);

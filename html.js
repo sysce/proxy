@@ -219,6 +219,8 @@ var rewriter = require('./index.js'),
 			},
 		});
 		
+		// https://tsh.io/blog/how-to-write-video-chat-app-using-webrtc-and-nodejs/
+		
 		delete win.navigator.getUserMedia;
 		delete win.navigator.mozGetUserMedia;
 		delete win.navigator.webkitGetUserMedia;

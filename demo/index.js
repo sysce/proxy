@@ -53,7 +53,5 @@ var fs = require('fs'),
 		}
 	};
 
-server.get('/uptime', (req, res) => res.send(process.uptime()));
-
 server.use('/prox', gateway);
 server.use('/gateway', gateway);
