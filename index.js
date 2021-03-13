@@ -1343,12 +1343,24 @@ module.exports = class {
 			[ 'Document', 'prototype', 'writeln', value => new Proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, that, [ this.html(args.join(''), def.rw_data({ snippet: true })) ]),
 			}) ],
-			[ false, 'Document', 'prototype', (value, desc) => Object.defineProperties(value, {
+			[ 'Document', 'prototype', 'open', value => new Proxy(value, {
+				apply: (target, that, args) => Reflect.apply(target, that, args.length === 3 ? [ this.url(args[0], def.rw_data()), ...args.slice(1) ] : args),
+			}) ],
+			[ false, 'Document', 'prototype', (value, desc, otitle) => (otitle = def.doc.title, def.doc.title = this.config.title, Object.defineProperties(value, {
 				URL: { get: _ => fills.url.href },
 				documentURI: { get: _ => fills.url.href },
 				domain: { get: _ => fills.url.hostname },
 				referrer: { get: _ => this.unurl(Reflect.apply(desc.referrer.get, def.doc, []), def.rw_data()) },
-			}) ],
+				cookie: {
+					get: _ => this.cookie_decode(Reflect.apply(desc.cookie.get, def.doc, []), def.rw_data()),
+					set: v => Reflect.apply(desc.cookie.set, global.document, [ this.cookie_encode(v, def.rw_data()) ]),
+				},
+				title: {
+					get: _ => otitle,
+					set: _ => otitle = _,
+				},
+				defaultView: { get: _ => $rw.fills.this },
+			})) ],
 			[ 'WebSocket', value => new Proxy(value, {
 				construct: (target, [ url, proto ]) => {
 					var ws = Reflect.construct(target, [ this.url(url, def.rw_data({ ws: true })), proto ]);
@@ -1389,8 +1401,6 @@ module.exports = class {
 					console.log(obj, prop);
 					
 					console.log(desc);
-					
-					throw err;
 				}
 			} }) ],
 			[ 'Object', 'defineProperties', value => new Proxy(value, {
@@ -1436,7 +1446,7 @@ module.exports = class {
 			[ 'Navigator', 'prototype', 'sendBeacon', value => new Proxy(value, {
 				apply: (target, that, [ url, data ]) => Reflect.apply(target, that, [ this.url(url, def.rw_data()), data ]),
 			}) ],
-			[ 'open', value => new Proxy(value, {
+			[ 'window', 'open', value => new Proxy(value, {
 				apply: (target, that, [ url, name, features ]) => Reflect.apply(target, that, [ this.url(url, def.rw_data()), name, features ]),
 			}) ],
 			[ 'Worker', value => new Proxy(value, {
