@@ -1598,7 +1598,7 @@ module.exports = class {
 				apply: (target, that, args) => Reflect.apply(target, def.restore(that)[0], def.restore(...args).map(x => x instanceof Element ? x : def.doc.body)),
 			}) ],
 			[ 'CSSStyleDeclaration', 'prototype', 'getPropertyValue', value => new Proxy(value, {
-				apply: (target, that, [ prop, value ]) => this.css(Reflect.apply(target, that, [ prop ])),
+				apply: (target, that, [ prop, value ]) => this.css(Reflect.apply(target, that, [ prop ]), def.rw_data()),
 			}) ],
 			[ 'CSSStyleDeclaration', 'prototype', 'setProperty', value => new Proxy(value, {
 				apply: (target, that, [ prop, value ]) => Reflect.apply(target, that, [ prop, this.css(value, def.rw_data({ prop: prop })) ]),
