@@ -1613,7 +1613,7 @@ module.exports = class {
 				},
 			})), value) ],
 			[ 'Document', 'prototype', 'createTreeWalker', value => new Proxy(value, {
-				apply: (target, ...vals) => Reflect.apply(target, ...def.restore(...vals)),
+				apply: (target, that, args) => Reflect.apply(target, def.restore(that)[0], def.restore(...args)),
 			}) ],
 			[ 'Node', 'prototype', 'contains', value => new Proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)),
