@@ -199,12 +199,19 @@ module.exports = class {
 							
 							if(failure)return;
 							
-							if(decoded.get('route') != 'false' && ['js', 'css', 'html', 'manifest'].includes(type))this.decompress(req, resp, body => {
+							if(decoded.get('route') != 'false' && ['js', 'css', 'html', 'manifest'].includes(type))this.decompress(req, resp, async body => {
 								if(!body.byteLength)return res.send(body);
 								
 								if(decoded.has('global'))data.global = decoded.get('global') == 'true';
 								
+								/*if(!this[type + '_async'])console.warn('async not implemented for ' + JSON.stringify(type));
+								else */
+								if(this[type + '_async'])type += '_async';
+								
 								var body = this[type](body, data);
+								
+								if(body instanceof Promise)body = await body.catch(err => util.format(err));
+								
 								
 								res.send(body);
 							});
@@ -675,6 +682,120 @@ module.exports = class {
 		
 		return JSON.stringify(json, (key, val) => ['start_url', 'key', 'src'].includes(key) ? this.url(val, data) : val);
 	}
+	/*server*/
+	tick(){
+		return new Promise(resolve => process.nextTick(resolve));
+	}
+	async html_async(value, data = {}){
+		if(!value)return value;
+		
+		value = value.toString('utf8');
+		
+		data.mime = data.mime || 'text/html';
+		
+		try{
+			var document = this.html_parser.parseFromString(module.browser ? '<div id="pro-root">' + value + '</div>' : value, data.mime),
+			charset = '<meta charset="ISO-8859-1">';
+		}catch(err){
+			console.error(err);
+			
+			return 'got:\n' + err.message;
+		}
+		
+		if(data.mime.includes('xml'))try{
+			// PROCESSING_INSTRUCTION_NODE = 7
+			var walker = this.dom.window.document.createTreeWalker(document, this.dom.window.NodeFilter.SHOW_PROCESSING_INSTRUCTION),
+				node;
+			
+			while(node = walker.nextNode()){
+				if(node.target == 'xml-stylesheet'){
+					var attrs = {};
+					
+					node.data.replace(this.regex.html.attribute, (match, name, value, x, string) => {
+						attrs[name] = string || value;
+					});
+					
+					if(this.mime.xsl.includes(attrs.type))attrs.href = this.url(attrs.href, data);
+					
+					node.data = Object.entries(attrs).map(([ name, value ]) => name + (value ? '=' + JSON.stringify(value) : '')).join(' ');
+				}
+				
+				await this.tick();
+			}
+		}catch(err){
+			console.error(err);
+		}
+		var time = Date.now();
+		
+		var nodes = document.querySelectorAll(module.browser ? '#pro-root *' : '*');
+		
+		for(var ind in nodes){
+			var node = nodes[ind];
+			
+			if(!(node instanceof this.dom.window.Node))continue;
+			
+			switch((node.tagName || '').toLowerCase()){
+				case'meta':
+					
+					if(node.outerHTML.toLowerCase().includes('charset'))charset = node.outerHTML;
+					
+					if(node.getAttribute('http-equiv') && node.getAttribute('content'))node.setAttribute('content', node.getAttribute('content').replace(/url=(.*?$)/, (m, url) => 'url=' + this.url(url, data)));
+					
+					// node.remove();
+					
+					break;
+				case'title':
+					
+					node.remove();
+					
+					break;
+				case'link':
+					
+					if(node.rel && node.rel.includes('icon'))node.remove();
+					// else if(node.rel == 'manifest')node.href = this.url(node.href, { origin: data.url, base: data.base, type: 'manifest' });
+					
+					break;
+				case'script':
+					var type = node.getAttribute('type') || this.mime.js[0];
+					
+					// 3rd true indicates this is a global script
+					if(this.mime.js.includes(type) && node.innerHTML)node.textContent = this.js(node.textContent, Object.assign({}, data, { global: true }));
+					
+					break;
+				case'style':
+					
+					node.innerHTML = this.css(node.innerHTML, data);
+					
+					break;
+				case'base':
+					
+					try{
+						if(node.href)data.url = data.base = new this.URL(node.href, this.valid_url(data.url).href);
+					}catch(err){
+						console.error(err);
+					}
+					
+					node.remove();
+					
+					break;
+			}
+			
+			var attrs = node.getAttributeNames();
+			
+			for(var attr_ind in attrs){
+				this.html_attr(node, attrs[attr_ind], data);
+				
+				await this.tick();
+			}
+			
+			await this.tick();
+		}
+		
+		if(!data.snippet && document.head)document.head.insertAdjacentHTML('afterbegin', `${charset}${decodeURI('%3C')}title>${this.config.title}${decodeURI('%3C')}/title>${decodeURI('%3C')}link type='image/x-icon' rel='shortcut icon' href='.${this.config.prefix}?favicon'>${decodeURI('%3C')}script src='${this.config.prefix}?html=${this.preload[1]}'>${decodeURI('%3C')}/script>`, 'proxied');
+		
+		return this.html_serial(document);
+	}
+	/*end_server*/
 	/**
 	* Parses and modifies HTML, needs the data object since the URL handler is called
 	* @param {String} value - Manifest code
