@@ -31,7 +31,7 @@ var rewriter = require('./index.js'),
 			}
 		},
 	},
-	url_protos = [global.Image,global.HTMLObjectElement,global.StyleSheet,global.SVGUseElement,global.SVGTextPathElement,global.SVGScriptElement,global.SVGPatternElement,global.SVGMPathElement,global.SVGImageElement,global.SVGGradientElement,global.SVGFilterElement,global.SVGFEImageElement,global.SVGAElement,global.HTMLTrackElement,global.HTMLSourceElement,global.HTMLScriptElement,global.HTMLMediaElement,global.HTMLLinkElement,global.HTMLImageElement,global.HTMLIFrameElement,global.HTMLFrameElement,global.HTMLEmbedElement,global.HTMLBaseElement,global.HTMLAreaElement,global.HTMLAnchorElement,global.CSSImportRule];
+	url_protos = [global.Image,global.HTMLObjectElement,global.StyleSheet,global.SVGUseElement,global.SVGTextPathElement,global.SVGScriptElement,global.SVGPatternElement,global.SVGMPathElement,global.SVGImageElement,global.SVGGradientElement,global.SVGFilterElement,global.SVGFEImageElement,global.SVGAElement,global.HTMLTrackElement,global.HTMLSourceElement,global.HTMLScriptElement,global.HTMLMediaElement,global.HTMLLinkElement,global.HTMLImageElement,global.HTMLIFrameElement,global.HTMLFrameElement,global.HTMLEmbedElement,global.HTMLBaseElement,global.HTMLAreaElement,global.HTMLAudioElement,global.HTMLAnchorElement,global.CSSImportRule];
 
 [ [ global.Event, org => ({
 	get target(){

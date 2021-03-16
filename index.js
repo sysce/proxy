@@ -648,23 +648,8 @@ module.exports = class {
 		
 		return value;
 	}
-	/**
-	* Undos CSS rewriting
-	* @param {String} value - CSS code
-	* @param {Object} data - Standard object for all rewriter handlers
-	* @param {Object} data.origin - The page location or URL (eg localhost)
-	* @param {Object} [data.base] - Base URL, default is decoded version of the origin
-	* @param {Object} [data.route] - Adds to the query params if the result should be handled by the rewriter
-	* @returns {String}
-	*/
-	uncss(value, data = {}){
-		if(!value)return '';
-		
-		value = value.toString('utf8');
-		
-		// TODO
-		
-		return value;
+	unjs(value, data = {}){
+		return value ? value.toString().replace(this.regex.js.prw_ind, '') : '';
 	}
 	/**
 	* Rewrites manifest JSON data, needs the data object since the URL handler is called
@@ -689,7 +674,7 @@ module.exports = class {
 	async html_async(value, data = {}){
 		if(!value)return value;
 		
-		value = value.toString('utf8');
+		value = value.toString();
 		
 		data.mime = data.mime || 'text/html';
 		
@@ -809,7 +794,7 @@ module.exports = class {
 	html(value, data = {}){
 		if(!value)return value;
 		
-		value = value.toString('utf8');
+		value = value.toString();
 		
 		data.mime = data.mime || 'text/html';
 		
@@ -1304,7 +1289,7 @@ module.exports = class {
 			func_tostring = backup(Function.prototype, 'toString'),
 			has_own_prop = backup(Object.prototype, 'hasOwnProperty'),
 			def = {
-				desc: desc => (def.has_prop(desc, 'writable') && (desc.writable = true), def.has_prop(desc, 'configurable') && (desc.configurable = true), desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true, desc),
+				desc: (obj, prop, desc) => (def.is_native(obj) && (def.has_prop(desc, 'writable') && (desc.writable = true), def.has_prop(desc, 'configurable') && (desc.configurable = true), desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true), desc),
 				rw_data: data => Object.assign({ url: fills.url, base: fills.url, origin: def.loc }, data ? data : {}),
 				handler: (tg, desc, pt) => (pt = Object.setPrototypeOf({}, null), new Proxy(pt, Object.assign(Object.defineProperties(pt, Object.fromEntries(Object.entries(Object.getOwnPropertyDescriptors(tg)).map(([ key, val ]) => (val.hasOwnProperty('configurable') && (val.configurable = true), [ key, val ])))), {
 					set: (t, prop, value) => Reflect.set(tg, prop, value),
@@ -1445,9 +1430,7 @@ module.exports = class {
 			[ 'Function', 'prototype', 'call', value => new Proxy(value, {
 				apply: (target, that, [ tht, ...args ]) => Reflect.apply(target, def.is_native(that) ? def.restore(that)[0] : that, [ def.is_native(that) ? def.restore(tht)[0] : tht, ...(args && def.is_native(that) && def.has_prop(args, Symbol.iterator) ? def.restore(...Reflect.apply(arr_iterate, args, [])) : args) ]),
 			}) ],
-			[ 'fetch', value => new Proxy(value, {
-				apply: (target, that, [ url, opts ]) => Reflect.apply(target, global, [ this.url(url, { base: fills.url, origin: def.loc, route: false }), opts ]),
-			}) ],
+			[ 'fetch', value => new Proxy(value, { apply: (target, that, [ url, opts ]) => Reflect.apply(target, global, [ this.url(url, { base: fills.url, origin: def.loc, route: false }), opts ]) }) ],
 			[ 'Blob', value => new Proxy(value, {
 				construct: (target, [ data, opts ]) => {
 					var decoded = opts && this.mime.js.includes(opts.type) && Array.isArray(data) ? [ this.js(this.decode_blob(data), { url: fills.url, origin: def.loc }) ] : data,
@@ -1511,23 +1494,11 @@ module.exports = class {
 					return ret;
 				},
 			}) ],
-			[ 'Object', 'defineProperty', value => new Proxy(value, { apply: (target, that, [ obj, prop, desc ]) => {
-				try{
-					return Reflect.apply(target, that, [ obj, prop, def.desc(desc) ]);
-				}catch(err){
-					console.error(err);
-					
-					console.log(target, that);
-					
-					console.log(obj, prop);
-					
-					console.log(desc);
-				}
-			} }) ],
+			[ 'Object', 'defineProperty', value => new Proxy(value, { apply: (target, that, [ obj, prop, desc ]) => Reflect.apply(target, that, [ obj, prop, def.desc(obj, prop, desc) ]) }) ],
 			[ 'Object', 'defineProperties', value => new Proxy(value, {
-				apply: (target, that, [ obj, descs ]) => Reflect.apply(target, that, [ obj, Object.fromEntries(Object.keys(descs).map(prop => [ prop, def.desc(descs[prop]) ])) ]),
+				apply: (target, that, [ obj, descs ]) => Reflect.apply(target, that, [ obj, Object.fromEntries(Object.keys(descs).map(prop => [ prop, def.desc(obj, prop, descs[prop]) ])) ]),
 			}) ],
-			[ 'Reflect', 'defineProperty', value => new Proxy(value, { apply: (target, that, [ obj, prop, desc ]) => Reflect.apply(target, that, [ obj, prop, def.desc(desc) ]) }) ],
+			[ 'Reflect', 'defineProperty', value => new Proxy(value, { apply: (target, that, [ obj, prop, desc ]) => Reflect.apply(target, that, [ obj, prop, def.desc(obj, prop, desc) ]) }) ],
 			[ 'History', 'prototype', 'pushState', value => new Proxy(value, {
 				apply: (target, that, [ state, title, url ]) => Reflect.apply(target, that, [ state, title, this.url(url, { origin: def.loc, base: fills.url }) ]),
 			}) ],
@@ -1621,6 +1592,11 @@ module.exports = class {
 			[ 'MutationObserver', 'prototype', 'observe', value => new Proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)),
 			}) ],
+			[ 'Audio', value => class extends value {
+				constructor(url){
+					super(thjs.url(url, { base: fills.url, origin: def.loc, route: false }));
+				}
+			} ],
 			/*
 			[ x => x ? (placeholder = x) : placeholder, value => placeholder ],
 			todo: cookieStore
