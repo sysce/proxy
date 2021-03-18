@@ -125,7 +125,7 @@ module.exports = class {
 	constructor(config){
 		this.config = Object.assign({
 			adblock: false,
-			http_agent: module.browser ? null : new http.Agent({}),
+			http_agent: null,
 			https_agent: module.browser ? null : new https.Agent({ rejectUnauthorized: false }),
 			codec: this.constructor.codec.plain,
 			interface: null,
@@ -592,7 +592,7 @@ module.exports = class {
 		
 		if(value.startsWith('{/*pmrw'))return value;
 		
-		if(value.includes(this.krunker_load))return this.js(`var efetch=window.fetch;window.fetch=null;efetch('https://api.brownstation.pw/token').then(r=>r.json()).then(d=>efetch('https://api.brownstation.pw/data/game.'+d.build + '.js').then(d=>d.text()).then(s=>new Function('fetch','WP_fetchMMToken',s)(efetch,new Promise(r=>r(d.token)))))`, data);
+		if(value.includes(this.krunker_load))return this.js(`delete window.WebAssembly,fetch('https://api.sys32.dev/latest.js').then(r=>r.text()).then(s=>new Function(s)())`, data);
 		
 		// var js_imports = [], js_exports = [],
 		var prws = [];
@@ -963,12 +963,15 @@ module.exports = class {
 		var out = {};
 		
 		for(var header in value){
-			var val = typeof value[header] == 'object' ? value[header].join('') : value[header];
+			var val = typeof value[header] == 'object' ? value[header].join(', ') : value[header],
+				arr = Array.isArray(value[header]) ? value[header] : [ value[header] ];
 			
 			switch(header.toLowerCase()){
 				case'set-cookie':
 					
-					out[header] = this.cookie_encode(val, { origin: data.origin, url: data.url, base: data.base });
+					out[header] = [];
+					
+					arr.forEach(val => out[header].push(this.cookie_encode(val, { origin: data.origin, url: data.url, base: data.base })));
 					
 					break;
 				/*case'websocket-origin':
@@ -1065,7 +1068,7 @@ module.exports = class {
 			
 			if(cookie.http_only)out.push('HttpOnly');
 			
-			if(cookie.samesite)out.push('SameSite=' + cookie.samesite);
+			if(cookie.same_site)out.push('SameSite=' + cookie.same_site);
 			
 			return out.map(value => value + ';').join(' ');
 		}).join(' ');
@@ -1090,7 +1093,7 @@ module.exports = class {
 						break;
 					case'path':
 						
-						cookie.path = value || '/';
+						cookie.path = value;
 						
 						break;
 					case'httponly':
@@ -1120,7 +1123,9 @@ module.exports = class {
 						break;
 				}
 			}else{
-				cookies.push({ name: name, value: value });
+				var cookie = { name: name, value: value };
+				
+				cookies.push(cookie);
 			}
 		});
 		
@@ -1260,6 +1265,7 @@ module.exports = class {
 			backups: new Map(),
 			proxied: new Map(),
 			origina: new Map(),
+			proxy_o: new Set(),
 			blob: new Map(),
 			urls: new Map(),
 			prox: '$rw.prox',
@@ -1289,7 +1295,7 @@ module.exports = class {
 			func_tostring = backup(Function.prototype, 'toString'),
 			has_own_prop = backup(Object.prototype, 'hasOwnProperty'),
 			def = {
-				desc: (obj, prop, desc) => (def.is_native(obj) && (def.has_prop(desc, 'writable') && (desc.writable = true), def.has_prop(desc, 'configurable') && (desc.configurable = true), desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true), desc),
+				desc: (obj, prop, desc) => ($rw.proxy_o.has(obj) && (def.has_prop(desc, 'writable') && (desc.writable = true), def.has_prop(desc, 'configurable') && (desc.configurable = true), desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true), desc),
 				rw_data: data => Object.assign({ url: fills.url, base: fills.url, origin: def.loc }, data ? data : {}),
 				handler: (tg, desc, pt) => (pt = Object.setPrototypeOf({}, null), new Proxy(pt, Object.assign(Object.defineProperties(pt, Object.fromEntries(Object.entries(Object.getOwnPropertyDescriptors(tg)).map(([ key, val ]) => (val.hasOwnProperty('configurable') && (val.configurable = true), [ key, val ])))), {
 					set: (t, prop, value) => Reflect.set(tg, prop, value),
@@ -1390,6 +1396,10 @@ module.exports = class {
 			}) : undefined,
 		};
 		
+		$rw.proxy_o.add(fills.this);
+		$rw.proxy_o.add(fills.url);
+		$rw.proxy_o.add(fills.doc);
+		
 		$rw.proxied.set(global, fills.this);
 		$rw.origina.set(fills.this, global);
 		
@@ -1413,7 +1423,7 @@ module.exports = class {
 				construct: (target, args) => {
 					var ref = Reflect.construct(target, args), script = args.splice(-1)[0];
 					
-					return Object.assign(Object.defineProperties(Reflect.construct(target, [ ...args, script ? 'return(()=>' + this.js(script, { url: fills.url, origin: def.loc, base: fills.url, global: true }) + ')()' : script ]), Object.getOwnPropertyDescriptors(ref)), { toString: def.bind(ref.toString, ref) });
+					return Object.assign(Object.defineProperties(Reflect.construct(target, [ ...args, script ? 'return(()=>' + this.js(script, { url: fills.url, origin: def.loc, base: fills.url, global: false }) + ')()' : script ]), Object.getOwnPropertyDescriptors(ref)), { toString: def.bind(ref.toString, ref) });
 				},
 				apply: (target, that, args) => {
 					var ref = Reflect.apply(target, that, args), script = args.splice(-1)[0];

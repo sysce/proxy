@@ -31,7 +31,7 @@
 		"documentation": "^13.1.1"
 	},
 	"dependencies": {
-		"sys-nodehttp": "^1.4.3",
+		"sys-nodehttp": "^1.5.0",
 		"terser": "^5.6.0"
 	}
 }
