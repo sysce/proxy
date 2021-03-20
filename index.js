@@ -7,9 +7,9 @@ var fs = require('fs'),
 	http = require('http'),
 	https = require('https'),
 	nodehttp = require('sys-nodehttp'),
-	WebSocket = require('./ws.js'),
-	terser = require('terser'),
-	jsdom = require('./jsdom.js').JSDOM,
+	WebSocket = require('./lib/ws'),
+	terser = require('./lib/terser'),
+	jsdom = require('./lib/jsdom').JSDOM,
 	bundler = class {
 		constructor(modules, wrapper = [ '', '' ]){
 			this.modules = modules;
@@ -31,13 +31,12 @@ var fs = require('fs'),
 	};
 /*end_server*/
 
-var URL = require('./url.js')
+var URL = require('./lib/url.js');
 
 /**
 * Rewriter
 * @param {Object} config
 * @param {Object} server - nodehttp server to run the proxy on, only on the serverside this is required
-* @param {Boolean} [config.adblock] - Determines if the easylist.txt file should be used for checking URLs, this may decrease performance and increase resource usage
 * @param {Boolean} [config.ws] - Determines if websocket support should be added
 * @param {Object} [config.codec] - The codec to be used (rewriter.codec.plain, base64, xor)
 * @param {Boolean} [config.prefix] - The prefix to run the proxy on
@@ -124,7 +123,6 @@ module.exports = class {
 	}
 	constructor(config){
 		this.config = Object.assign({
-			adblock: false,
 			http_agent: null,
 			https_agent: module.browser ? null : new https.Agent({ rejectUnauthorized: false }),
 			codec: this.constructor.codec.plain,
@@ -184,12 +182,6 @@ module.exports = class {
 								content_type = data.mime = (resp.headers['content-type'] || '').split(';')[0],
 								type =  content_type == 'text/plain' ? 'plain' : dest == 'font' ? 'font' : decoded.has('type') ? decoded.get('type') : dest == 'script' ? 'js' : (this.mime_ent.find(([ key, val ]) => val.includes(content_type)) || [])[0],
 								dec_headers = this.headers_decode(resp.headers, data);
-							
-							if(this.config.adblock && !failure){
-								var matched = this.adblock.match(url, type);
-								
-								if(matched)return res.cgi_status(401, '<pre>EasyList has prevented the following page from loading:\n' + res.sanitize(url.href) + '\n\nBecause of the following filter:\n' + JSON.stringify(matched) + '</pre>');
-							}
 							
 							res.status(resp.statusCode.toString().startsWith('50') ? 400 : resp.statusCode);
 							
@@ -282,96 +274,6 @@ module.exports = class {
 				});
 			}
 		}
-		
-		if(this.config.adblock){
-			this.adblock = {
-				filters: [],
-				exceptions: [],
-				test(url, type, dat){ // determines if rule matches URL and type
-					// validation
-					
-					if(dat[2].script && type != 'js')return false;
-					if(dat[2].document && type != 'html')return false;
-					if(dat[2].subdocument && type != 'html')return false;
-					
-					if(dat[2].domain){
-						/*
-						domain
-							[0] applies
-							[1] exceptions
-						*/
-						
-						// !dat[2].domain[0].some(domain => domain.endsWith('.' + url.host) || domain == url.host)
-						if(!dat[2].domain[0].includes(url.host) || dat[2].domain[1].includes(url.host))return;
-					}
-					
-					// regexing
-					// check against url without protocol
-					
-					var match = url.href.substr(url.href.indexOf(url.hostname)).match(dat[1]);
-					
-					return match || false;
-				},
-				match(url, type){ // tests for exceptions and on all rules
-					for(var ind = 0; ind < this.filters.length; ind++){
-						if(this.test(url, type, this.filters[ind])){
-							// match against exceptions
-							for(var exp_ind = 0; exp_ind < this.exceptions.length; exp_ind++)if(this.test(url, type, this.exceptions[exp_ind]))return;
-							
-							return this.filters[ind];
-						}
-					}
-				},
-				parse(rule){ // turns rule into object
-					var str = rule,
-						com_ind = str.indexOf('! ');
-					
-					if(com_ind != -1)str = str.slice(0, com_ind);
-					
-					var opt_ind = str.lastIndexOf('$'),
-						options = opt_ind == -1 ? {} : Object.fromEntries(str.substr(opt_ind + 1).split(',').map(val => val.split('=')));
-					
-					if(options.domain){
-						var domains = options.domain.split('|'),
-							applies = domains.filter(x => !x.startsWith('~')),
-							excepts = domains.filter(x => x.startsWith('~'));
-						
-						options.domain = [ applies, excepts ];
-					}
-					
-					if(opt_ind != -1)str = str.slice(0, opt_ind);
-					
-					var css_ind = str.indexOf('##');
-					
-					if(css_ind != -1)return;
-					
-					var dir_ind = str.indexOf('||');
-					
-					if(dir_ind != -1)str = str.slice(dir_ind);
-					
-					// exception
-					
-					var exp = str.startsWith('@@');
-					
-					if(exp)str = str.slice(2);
-					
-					if(!str || str.startsWith('[') || !str.length)return;
-					
-					/*
-					[0] string
-					[1] regex
-					[2] options
-					[3] exception
-					*/
-					
-					var regex = str.startsWith('/') && str.endsWith('/') ? new RegExp(str.slice(1, -1)) : new RegExp(str.replace(/[\[\]?$()\/\\|.+]/g, char => '\\' + char).replace(/\*/g, '.*?').replace(/\^/g, '([^a-zA-Z0-9_\\-.%]|^|$)'));
-					
-					this[exp ? 'exceptions' : 'filters'].push([ str, regex, options, rule ]);
-				},
-			};
-			
-			fs.promises.readFile(path.join(__dirname, 'easylist.txt'), 'utf8').then(text => text.split('\n').forEach(rule => this.adblock.parse(rule)));
-		}
 		/*end_server*/
 		
 		this.dom = module.browser ? global : new jsdom();
@@ -396,7 +298,7 @@ module.exports = class {
 				sourceurl: /#\s*?sourceURL/gi,
 			},
 			css: {
-				url: /(?<![a-z])(url\s*?\()(["']?)([\s\S]*?)\2\)/gi,
+				url: /(?!(["'`])[^"'`]*?\1)(?<![^\s:])url\(((?:[^"'`]|(["'`])[^"'`]*?\3)*?)\)/g,
 				import: /(@import\s*?(\(|"|'))([\s\S]*?)(\2|\))/gi,
 				property: /(\[)(\w+)(\*?=.*?]|])/g,
 			},
@@ -430,7 +332,7 @@ module.exports = class {
 		this.attr = {
 			html: [ [ 'iframe' ], [ 'srcdoc' ] ],
 			css: [ '*', [ 'style' ] ],
-			css_keys: [ 'background', 'background-image' ],
+			css_keys: [ 'background', 'background-image', 'src' ],
 			url: [ [ 'track', 'template', 'source', 'script', 'object', 'media', 'link', 'input', 'image', 'video', 'iframe', 'frame', 'form', 'embed', 'base', 'area', 'anchor', 'a', 'img', 'use' ], [ 'srcset', 'href', 'xlink:href', 'src', 'action', 'content', 'data', 'poster' ] ],
 			// js attrs begin with on
 			del: [ '*', ['nonce', 'integrity'] ],
@@ -445,10 +347,10 @@ module.exports = class {
 		/*server*/if(!module.browser){
 			var mods = new bundler([
 					path.join(__dirname, 'html.js'),
-					path.join(__dirname, 'url.js'),
+					path.join(__dirname, 'lib', 'url.js'),
 					__filename,
 				]),
-				compact = new bundler([ path.join(__dirname, 'url.js'), __filename ]);
+				compact = new bundler([ path.join(__dirname, 'lib', 'url.js'), __filename ]);
 			
 			this.preload = ['', 0];
 			
@@ -514,8 +416,6 @@ module.exports = class {
 		if(module.browser && value instanceof global.Request)value = value.url;
 		if(typeof value == 'object')value = value.hasOwnProperty('url') ? value.url : value + '';
 		
-		value = value;
-		
 		if(value.startsWith('blob:') && data.type == 'js' && module.browser){
 			var raw = global.$rw.urls.get(value);
 			
@@ -545,6 +445,8 @@ module.exports = class {
 		
 		query.set('url', encodeURIComponent(this.config.codec.encode(out, data)));
 		
+		if(data.keep_input)query.set('raw', this.config.codec.encode(value));
+		
 		if(data.hasOwnProperty('global'))query.set('global', data.global);
 		if(data.type)query.set('type', data.type);
 		if(data.hasOwnProperty('route'))query.set('route', data.route);
@@ -568,6 +470,8 @@ module.exports = class {
 		var decoded = this.decode_params(value);
 		
 		if(!decoded.has('url'))return value;
+		
+		if(decoded.has('raw') && data.keep_input)return this.config.codec.decode(decoded.get('raw'), data);
 		
 		var out = this.config.codec.decode(decoded.get('url'), data),
 			search_ind = out.indexOf('?');
@@ -640,10 +544,42 @@ module.exports = class {
 		value += '';
 		
 		[
-			[this.regex.css.url, (m, start, quote = '"', url) => start + JSON.stringify(this.url(url, data)) + ')'],
+			[this.regex.css.url, (match, a, field) => {
+				var wrap = '';
+				
+				if(['\'', '"', '`'].includes(field[0]))wrap = field[0], field = field.slice(1, -1);
+				
+				if(!wrap)wrap = '"';
+				
+				field = wrap + this.url(field, data) + wrap;
+				
+				return 'url(' + field + ')';
+			} ],
 			[this.regex.sourcemap, '# undefined'],
 			[this.regex.css.import, (m, start, quote, url) => start + this.url(url, data) + quote ],
-			// [this.regex.css.property, (m, start, name, end) => start + (this.attr_type(name) == 'url' ? 'data-rw' + name : name) + end ],
+		].forEach(([ reg, val ]) => value = value.replace(reg, val));
+		
+		return value;
+	}
+	uncss(value, data = {}){
+		if(!value)return value;
+		
+		value += '';
+		
+		[
+			[this.regex.css.url, (match, a, field) => {
+				var wrap = '';
+				
+				if(['\'', '"', '`'].includes(field[0]))wrap = field[0], field = field.slice(1, -1);
+				
+				if(!wrap)wrap = '"';
+				
+				field = wrap + this.unurl(field, data) + wrap;
+				
+				return 'url(' + field + ')';
+			} ],
+			[this.regex.sourcemap, '# undefined'],
+			[this.regex.css.import, (m, start, quote, url) => start + this.url(url, data) + quote ],
 		].forEach(([ reg, val ]) => value = value.replace(reg, val));
 		
 		return value;
@@ -1355,6 +1291,7 @@ module.exports = class {
 					Window: global.Window,
 					get location(){ return fills.url },
 					set location(value){ return fills.url.href = value },
+					// origin can be a getter
 					get origin(){ return fills.url.origin },
 					get parent(){ try{ return global.parent.$rw.proxied.get(global.parent) }catch(err){ return fills.this } },
 					get top(){ try{ return global.top.$rw.proxied.get(global.top) }catch(err){ return fills.this } },
@@ -1587,10 +1524,10 @@ module.exports = class {
 			// route rewritten props to the hooked function
 			[ 'CSSStyleDeclaration', value => (this.attr.css_keys.forEach(prop => Object.defineProperty(value.prototype, prop, {
 				get(){
-					return this.getPropertyValue(prop);
+					return thjs.uncss(this.getPropertyValue(prop), def.rw_data({ keep_input: true }));
 				},
 				set(value){
-					return this.setProperty(prop, value);
+					return this.setProperty(prop, thjs.css(value, def.rw_data({ keep_input: true })));
 				},
 			})), value) ],
 			[ 'Document', 'prototype', 'createTreeWalker', value => new Proxy(value, {

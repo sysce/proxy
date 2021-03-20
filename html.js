@@ -176,7 +176,7 @@ url_protos.forEach(con => {
 				removeAttribute: (attr, val) => {
 					return Reflect.apply(org.removeAttribute.value, this, [ attr, val ]);
 				},
-			}, attr, pm.rw_data());
+			}, attr, pm.rw_data({ keep_input: true }));
 		},
 	}));
 	
