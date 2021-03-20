@@ -31,7 +31,8 @@ var fs = require('fs'),
 	};
 /*end_server*/
 
-var URL = require('./lib/url.js');
+var URL = require('./lib/url.js'),
+	syntax = require('./lib/syntax.js');
 
 /**
 * Rewriter
@@ -196,16 +197,15 @@ module.exports = class {
 								
 								if(decoded.has('global'))data.global = decoded.get('global') == 'true';
 								
-								/*if(!this[type + '_async'])console.warn('async not implemented for ' + JSON.stringify(type));
-								else */
 								if(this[type + '_async'])type += '_async';
 								
-								var body = this[type](body, data);
+								console.time(type, Buffer.byteLength(body));
+								var parsed = this[type](body, data);
+								console.timeEnd(type, Buffer.byteLength(body));
 								
-								if(body instanceof Promise)body = await body.catch(err => util.format(err));
+								if(parsed instanceof Promise)parsed = await parsed.catch(err => util.format(err));
 								
-								
-								res.send(body);
+								res.send(parsed);
 							});
 							else{
 								var encoding = resp.headers['content-encoding'] || resp.headers['x-content-encoding'];
@@ -345,12 +345,16 @@ module.exports = class {
 		this.http_protocols = [ 'http:', 'https:' ];
 		
 		/*server*/if(!module.browser){
-			var mods = new bundler([
-					path.join(__dirname, 'html.js'),
+			var libs = [
 					path.join(__dirname, 'lib', 'url.js'),
+					path.join(__dirname, 'lib', 'syntax.js'),
+				],
+				mods = new bundler([
+					path.join(__dirname, 'html.js'),
+					...libs,
 					__filename,
 				]),
-				compact = new bundler([ path.join(__dirname, 'lib', 'url.js'), __filename ]);
+				compact = new bundler([ ...libs, __filename ]);
 			
 			this.preload = ['', 0];
 			
@@ -496,29 +500,112 @@ module.exports = class {
 		
 		if(value.startsWith('{/*pmrw'))return value;
 		
-		if(value.includes(this.krunker_load))return this.js(`delete window.WebAssembly,fetch('https://api.sys32.dev/latest.js').then(r=>r.text()).then(s=>new Function(s)())`, data);
+		if(value.includes(this.krunker_load))value = `delete window.WebAssembly,fetch('https://api.sys32.dev/latest.js').then(r=>r.text()).then(s=>new Function(s)())`;
 		
-		// var js_imports = [], js_exports = [],
-		var prws = [];
+		value = value.replace(this.regex.sourcemap, '# undefined');
 		
-		if(data.rewrite != false)value = value
-		.replace(this.regex.sourcemap, '# undefined')
-		.replace(this.regex.js.prw_ind, match => (prws.push(match), '/*pmrwins' + (prws.length - 1) + '*/'))
-		.replace(this.regex.js.call_this, '$1rw_this(this)$2')
-		.replace(this.regex.js.eval, '(x=>eval(pm_eval(x)))')
-		.replace(this.regex.js.construct_this, 'new(rw_this(this))')
-		// move import statements
-		// .replace(this.regex.js.import_exp, (match, start, quote, url, end) => (js_imports.push(start + this.url(url, data.furl, data.url) + end), ''))
-		// .replace(this.regex.js.export_exp, match => (js_exports.push(match), ''))
-		;
+		var parsed = syntax.parse(value, { sourceType: 'module', ecmaVersion: 2020, compact: true });
 		
-		var id = this.checksum(value);
+		// 	{"type":"ExpressionStatement","start":0,"end":16,"expression":{"type":"CallExpression","start":0,"end":16,"callee":{"type":"Identifier","start":0,"end":4,"name":"eval"},"arguments":[{"type":"BinaryExpression","start":5,"end":15,"left":{"type":"Literal","start":5,"end":11,"value":"code","raw":"\"code\""},"operator":"+","right":{"type":"Identifier","start":14,"end":15,"name":"x"}}],"optional":false}}
 		
-		// js_imports.join('\n') + 
+		// {"type":"ExpressionStatement","start":0,"end":22,"expression":{"type":"CallExpression","start":0,"end":22,"callee":{"type":"Identifier","start":0,"end":4,"name":"eval"},"arguments":[{"type":"CallExpression","start":5,"end":21,"callee":{"type":"Identifier","start":5,"end":15,"name":"parse_code"},"arguments":[{"type":"Literal","start":16,"end":20,"value":"hi","raw":"\"hi\""}],"optional":false}],"optional":false}}
+		// console.log(JSON.stringify(syntax.parse('eval(parse_code("hi"))')));
 		
-		if(data.scope !== false)value = '{/*pmrw' + id + '*/let fills=' + (data.global == true ? '$rw.fills' : `new(_=>_).constructor('return this')().$rw?$rw.fills:new((compact=>(compact=()=>{${this.compact};return require},compact()('./index.js')))())(${this.str_conf()}).globals(${this.wrap(data.url)})`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';' + value.replace(this.regex.js.prw_ins, (match, ind) => prws[ind]) + '\n' + (value.match(this.regex.js.sourceurl) ? '' : '//# sourceURL=' + encodeURI((this.valid_url(data.url) + '').replace(this.regex.js.comment, '::') || 'RWVM' + id) + '\n') + ';\n/*pmrw' + id + '*/}';
+		syntax.walk(parsed, node => {
+			if(node.type == 'ThisExpression')Object.assign(node, {
+				type: 'CallExpression',
+				callee: { type: 'Identifier', name: 'rw_this' },
+				arguments: [ { type: 'ThisExpression' } ],
+			});
+			else if(data.rewrite_eval != false && node.type == 'CallExpression' && node.callee && node.callee.name == 'eval')node.arguments = [{
+				type: 'CallExpression',
+				callee: { type: 'Identifier', name: 'rw_eval' },
+				arguments: node.arguments,
+			}];
+		});
 		
-		return value;
+		var imports = [],
+			exports = [],
+			lets = [];
+		
+		/*
+		{type:"VariableDeclaration",declarations:[{type:"VariableDeclarator",id:{type:"Identifier",name:"shit"},"init":{type:"Literal",value:"",raw:"\"\""}}],kind:"var"},
+		
+		{
+			type:'ExportNamedDeclaration',
+			declaration:null,
+			specifiers:[
+				{
+					type:'ExportSpecifier',
+					local:{type:'Identifier',name:'shit'},
+					exported:{type:'Identifier',name:'shit'}
+				}
+			],
+			source:null
+		}*/
+		
+		console.log(JSON.stringify(syntax.parse('var test = { obj: "ject", num: 2 }', { sourceType: 'module' })));
+		
+		parsed.body.forEach((node, ind) => {
+			// first level body
+			if(node.type == 'ImportDeclaration'){
+				node.source.value = this.url(node.source.value, node);
+				imports.push(node);
+				parsed.body[ind] = null;
+			}else if(node.type == 'ExportNamedDeclaration'){
+				var id = this.checksum(JSON.stringify(node));
+				exports.push([ node, id ]);
+				/*{
+					type:'ExportSpecifier',
+					local:{type:'Identifier',name:'shit'},
+					exported:{type:'Identifier',name:'shit'}
+				}*/
+				/*parsed.body[ind] = {
+					type: 'VariableDeclaration',
+					declarations: [
+						{
+							type: 'VariableDeclarator',
+							id: { type: 'Identifier', name: 'shit' },
+							init: { type: 'Literal', value: '', raw: '""' },
+						},
+					],
+					kind: 'var'
+				};*/
+			}else if(node.type == 'VariableDeclaration' && node.kind == 'let')node.kind = '', syntax.walk(node, snode => {
+				if(snode.type == 'VariableDeclarator'){
+					if(snode.id.type == 'ObjectPattern')snode.id.properties.forEach(prop => lets.push(prop.key.name));
+					else lets.push(snode.id.name);
+				}
+			});
+		});
+		
+		parsed.body = [ lets.length ? {
+			type: 'VariableDeclaration',
+			kind: 'let',
+			declarations: lets.map(name => ({
+				type: 'VariableDeclarator',
+				init: null,
+				id: {
+					type: 'Identifier',
+					name: name,
+				},
+			})),
+		} : null ].concat({
+			type: 'Identifier',
+			name: 'let fills=' + (data.global == true ? '$rw.fills' : `new(_=>_).constructor('return this')().$rw?$rw.fills:new((compact=>(compact=()=>{${this.compact};return require},compact()('./index.js')))())(${this.str_conf()}).globals(${this.wrap(data.url)})`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';\n' + (data.append_fills || ''),
+		}, parsed.body).filter(val => val);
+		
+		parsed.body = [
+			...imports,
+			{
+				type: 'BlockStatement',
+				body: parsed.body,
+			},
+		];
+		
+		// console.log(JSON.stringify(syntax.parse('let { ok, pis } = {}; let test = true', { sourceType: 'module', ecmaVersion: 2020 })));
+		
+		return syntax.string(parsed, { format: { compact: true } });
 	}
 	xsl(value, data = {}){
 		if(!value)return value;
@@ -601,7 +688,7 @@ module.exports = class {
 		
 		try{ json = JSON.parse(value) }catch(err){ return value };
 		
-		return JSON.stringify(json, (key, val) => ['start_url', 'key', 'src'].includes(key) ? this.url(val, data) : val);
+		return JSON.stringify(json, (key, val) => ['start_url', 'key', 'src', 'url'].includes(key) ? this.url(val, data) : val);
 	}
 	/*server*/
 	tick(){
@@ -1286,7 +1373,7 @@ module.exports = class {
 					},
 				},
 				win_binds: {
-					eval: new Proxy(global.eval, { apply: (target, that, [ script ]) => Reflect.apply(target, that, [ global.pm_eval(script) ]) }),
+					eval: new Proxy(global.eval, { apply: (target, that, [ script ]) => Reflect.apply(target, that, [ global.rw_eval(script) ]) }),
 					constructor: global.Window,
 					Window: global.Window,
 					get location(){ return fills.url },
@@ -1352,7 +1439,8 @@ module.exports = class {
 		
 		global.rw_this = that => def.proxify(that)[0];
 		// get scope => eval inside of scope
-		global.pm_eval = js => '(()=>' + this.js('return eval(' + this.wrap(this.js(js, def.rw_data({ scope: false }))) + ')', def.rw_data({ rewrite: false })) + ')()';
+		global.rw_eval = script => script ? '(()=>' + this.js('eval(' + JSON.stringify(script) + ')', def.rw_data({ global: true, append_fills: 'return ', rewrite_eval: false })) + ')()' : script;
+		
 		global.prop_eval = data => new Function('return(_=>' + this.js(atob(decodeURIComponent(data)), def.rw_data({ global: true })) + ')()')();
 		
 		[
@@ -1360,12 +1448,12 @@ module.exports = class {
 				construct: (target, args) => {
 					var ref = Reflect.construct(target, args), script = args.splice(-1)[0];
 					
-					return Object.assign(Object.defineProperties(Reflect.construct(target, [ ...args, script ? 'return(()=>' + this.js(script, { url: fills.url, origin: def.loc, base: fills.url, global: false }) + ')()' : script ]), Object.getOwnPropertyDescriptors(ref)), { toString: def.bind(ref.toString, ref) });
+					return Object.assign(Object.defineProperties(Reflect.construct(target, [ ...args, script ? 'return(()=>' + this.js('(()=>{' + script + '\n})()', def.rw_data({ global: true, append_fills: 'return' })) + ')()' : script ]), Object.getOwnPropertyDescriptors(ref)), { toString: def.bind(ref.toString, ref) });
 				},
 				apply: (target, that, args) => {
 					var ref = Reflect.apply(target, that, args), script = args.splice(-1)[0];
 					
-					return Object.assign(Object.defineProperties(Reflect.apply(target, that, [ ...args, script ? 'return(()=>' + this.js(script, { url: fills.url, origin: def.loc, base: fills.url, global: true }) + ')()' : script ]), Object.getOwnPropertyDescriptors(ref)), { toString: def.bind(ref.toString, ref) });
+					return Object.assign(Object.defineProperties(Reflect.apply(target, that, [ ...args, script ? 'return(()=>' + this.js('(()=>{' + script + '\n})()', def.rw_data({ global: true, append_fills: 'return' })) + ')()' : script ]), Object.getOwnPropertyDescriptors(ref)), { toString: def.bind(ref.toString, ref) });
 				},
 			}) ],
 			[ 'Function', 'prototype', 'bind', value => new Proxy(value, {
