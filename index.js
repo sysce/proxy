@@ -504,11 +504,12 @@ module.exports = class {
 		
 		value = value.replace(this.regex.sourcemap, '# undefined');
 		
-		var parsed = syntax.parse(value, {
-			allowImportExportEverywhere: true,
-			ecmaVersion: 2020,
-			compact: true,
-		});
+		var parsed = syntax.parse(value, { sourceType: 'module', ecmaVersion: 2020, compact: true });
+		
+		// 	{"type":"ExpressionStatement","start":0,"end":16,"expression":{"type":"CallExpression","start":0,"end":16,"callee":{"type":"Identifier","start":0,"end":4,"name":"eval"},"arguments":[{"type":"BinaryExpression","start":5,"end":15,"left":{"type":"Literal","start":5,"end":11,"value":"code","raw":"\"code\""},"operator":"+","right":{"type":"Identifier","start":14,"end":15,"name":"x"}}],"optional":false}}
+		
+		// {"type":"ExpressionStatement","start":0,"end":22,"expression":{"type":"CallExpression","start":0,"end":22,"callee":{"type":"Identifier","start":0,"end":4,"name":"eval"},"arguments":[{"type":"CallExpression","start":5,"end":21,"callee":{"type":"Identifier","start":5,"end":15,"name":"parse_code"},"arguments":[{"type":"Literal","start":16,"end":20,"value":"hi","raw":"\"hi\""}],"optional":false}],"optional":false}}
+		// console.log(JSON.stringify(syntax.parse('eval(parse_code("hi"))')));
 		
 		syntax.walk(parsed, node => {
 			if(node.type == 'ThisExpression')Object.assign(node, {
@@ -527,60 +528,49 @@ module.exports = class {
 			exports = [],
 			lets = [];
 		
-		/*try{
-			if(!data.stac)console.log(this.js('export let sus = eval("window");', Object.assign({}, data, { stac: true })));
-		}catch(err){ console.error(err) }*/
+		/*
+		{type:"VariableDeclaration",declarations:[{type:"VariableDeclarator",id:{type:"Identifier",name:"shit"},"init":{type:"Literal",value:"",raw:"\"\""}}],kind:"var"},
+		
+		{
+			type:'ExportNamedDeclaration',
+			declaration:null,
+			specifiers:[
+				{
+					type:'ExportSpecifier',
+					local:{type:'Identifier',name:'shit'},
+					exported:{type:'Identifier',name:'shit'}
+				}
+			],
+			source:null
+		}*/
+		
+		console.log(JSON.stringify(syntax.parse('var test = { obj: "ject", num: 2 }', { sourceType: 'module' })));
 		
 		parsed.body.forEach((node, ind) => {
 			// first level body
 			if(node.type == 'ImportDeclaration'){
 				node.source.value = this.url(node.source.value, node);
 				imports.push(node);
-				node.delete = true;
+				parsed.body[ind] = null;
 			}else if(node.type == 'ExportNamedDeclaration'){
-				// much more work needed on exports
-				// pull out expressions specifically
-				// CallExpression
-				// VariableDeclarator ?
-				
-				var exps = [],
-					wind = 0;
-				
-				syntax.walk(node, snode => {
-					wind++;
-					
-					if(snode.type == 'ExpressionStatement'){
-						var id = 'EXPORT_STATE_' + ind;
-						
-						exps.push([ snode.expression, id ]);
-						
-						Object.assign(snode, {
-							type: 'ExpressionStatement',
-							expression: { type: 'Identifier', name: id },
-						});
-					}else if(snode.type == 'ExportNamedDeclaration'){
-						snode.specifiers.forEach((specifier, ind) => {
-							var id = 'EXPORT_NAME_' + ind;
-							
-							exps.push([ specifier.local, id ]);
-							
-							specifier.local = { type: 'Identifier', name: id };
-						});
-					}
-				});
-				
-				exports.push(node);
-				
-				// replace in array
-				parsed.body.splice(ind, 1, {
+				var id = this.checksum(JSON.stringify(node));
+				exports.push([ node, id ]);
+				/*{
+					type:'ExportSpecifier',
+					local:{type:'Identifier',name:'shit'},
+					exported:{type:'Identifier',name:'shit'}
+				}*/
+				/*parsed.body[ind] = {
 					type: 'VariableDeclaration',
-					declarations: exps.map(([ exp, id ]) => ({
-						type: 'VariableDeclarator',
-						id: { type: 'Identifier', name: id },
-						init: exp,
-					})),
-					kind: 'var',
-				});
+					declarations: [
+						{
+							type: 'VariableDeclarator',
+							id: { type: 'Identifier', name: 'shit' },
+							init: { type: 'Literal', value: '', raw: '""' },
+						},
+					],
+					kind: 'var'
+				};*/
 			}else if(node.type == 'VariableDeclaration' && node.kind == 'let')node.kind = '', syntax.walk(node, snode => {
 				if(snode.type == 'VariableDeclarator'){
 					if(snode.id.type == 'ObjectPattern')snode.id.properties.forEach(prop => lets.push(prop.key.name));
@@ -603,7 +593,7 @@ module.exports = class {
 		} : null ].concat({
 			type: 'Identifier',
 			name: 'let fills=' + (data.global == true ? '$rw.fills' : `new(_=>_).constructor('return this')().$rw?$rw.fills:new((compact=>(compact=()=>{${this.compact};return require},compact()('./index.js')))())(${this.str_conf()}).globals(${this.wrap(data.url)})`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';\n' + (data.append_fills || ''),
-		}, parsed.body).filter(val => val && !val.delete);
+		}, parsed.body).filter(val => val);
 		
 		parsed.body = [
 			...imports,
@@ -611,11 +601,11 @@ module.exports = class {
 				type: 'BlockStatement',
 				body: parsed.body,
 			},
-			...exports,
 		];
 		
-		// true
-		return syntax.string(parsed, { format: { compact: false } });
+		// console.log(JSON.stringify(syntax.parse('let { ok, pis } = {}; let test = true', { sourceType: 'module', ecmaVersion: 2020 })));
+		
+		return syntax.string(parsed, { format: { compact: true } });
 	}
 	xsl(value, data = {}){
 		if(!value)return value;
