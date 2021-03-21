@@ -27,9 +27,6 @@
 	],
 	"author": "systemya",
 	"license": "GPL-3.0",
-	"devDependencies": {
-		"documentation": "^13.1.1"
-	},
 	"dependencies": {
 		"sys-nodehttp": "^1.5.1"
 	}
