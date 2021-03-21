@@ -320,7 +320,7 @@ module.exports = class {
 		this.krunker_load = decodeURIComponent(`color%3Argba(255%2C255%2C255%2C0.4)'%3EMake%20sure%20you%20are%20using%20the%20latest%20version`);
 		
 		this.mime = {
-			js: [ 'text/javascript', 'text/emcascript', 'text/x-javascript', 'text/x-emcascript', 'application/javascript', 'application/x-javascript', 'application/emcascript', 'application/x-emcascript' ],
+			js: [ 'module', 'text/javascript', 'text/emcascript', 'text/x-javascript', 'text/x-emcascript', 'application/javascript', 'application/x-javascript', 'application/emcascript', 'application/x-emcascript' ],
 			css: [ 'text/css' ],
 			xsl: [ 'text/xsl' ],
 			html: [ 'text/html', 'text/xml', 'application/xml', 'application/xhtml+xml', 'application/xhtml+xml' ],
@@ -498,8 +498,6 @@ module.exports = class {
 		
 		value += '';
 		
-		if(value.startsWith('{/*pmrw'))return value;
-		
 		if(value.includes(this.krunker_load))value = `delete window.WebAssembly,fetch('https://api.sys32.dev/latest.js').then(r=>r.text()).then(s=>new Function(s)())`;
 		
 		value = value.replace(this.regex.sourcemap, '# undefined');
@@ -507,7 +505,6 @@ module.exports = class {
 		var parsed = syntax.parse(value, {
 			allowImportExportEverywhere: true,
 			ecmaVersion: 2020,
-			compact: true,
 		});
 		
 		syntax.walk(parsed, node => {
@@ -531,10 +528,12 @@ module.exports = class {
 			if(!data.stac)console.log(this.js('export let sus = eval("window");', Object.assign({}, data, { stac: true })));
 		}catch(err){ console.error(err) }*/
 		
+		// {"type":"ImportDeclaration","start":0,"end":44,"specifiers":[{"type":"ImportSpecifier","start":9,"end":17,"imported":{"type":"Identifier","start":9,"end":17,"name":"Recorder"},"local":{"type":"Identifier","start":9,"end":17,"name":"Recorder"}}],"source":{"type":"Literal","start":25,"end":43,"value":"./js/Recorder.js","raw":"'./js/Recorder.js'"}}
+		
 		parsed.body.forEach((node, ind) => {
 			// first level body
 			if(node.type == 'ImportDeclaration'){
-				node.source.value = this.url(node.source.value, node);
+				node.source.value = this.url(node.source.value, data);
 				imports.push(node);
 				node.delete = true;
 			}else if(node.type == 'ExportNamedDeclaration'){
@@ -550,7 +549,7 @@ module.exports = class {
 					wind++;
 					
 					if(snode.type == 'ExpressionStatement'){
-						var id = 'EXPORT_STATE_' + ind;
+						var id = 'EXPORT_STATE_' + wind;
 						
 						exps.push([ snode.expression, id ]);
 						
