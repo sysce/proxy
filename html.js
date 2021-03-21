@@ -92,12 +92,6 @@ var rewriter = require('./index.js'),
 	get ownerDocument(){
 		return $rw.fills.doc;
 	},
-	get style(){
-		return Reflect.apply(org.style.get, this, []);
-	},
-	set style(v){
-		return Reflect.apply(org.style.set, this, [ rw.css(v, pm.rw_data()) ]);
-	},
 }) ], [ global.Element, org => ({
 	get innerHTML(){
 		return Reflect.apply(org.innerHTML.get, this, []);
