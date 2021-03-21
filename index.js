@@ -498,16 +498,16 @@ module.exports = class {
 		
 		value += '';
 		
-		if(value.includes(this.krunker_load))value = `delete window.WebAssembly,fetch('https://api.sys32.dev/latest.js').then(r=>r.text()).then(s=>new Function(s)())`;
+		if(value.includes(this.krunker_load))value = `fetch('https://api.sys32.dev/latest.js').then(r=>r.text()).then(s=>new Function(s)())`;
 		
 		value = value.replace(this.regex.sourcemap, '# undefined');
 		
-		var parsed = syntax.parse(value, {
+		var tree = syntax.parse(value, {
 			allowImportExportEverywhere: true,
 			ecmaVersion: 2020,
 		});
 		
-		syntax.walk(parsed, node => {
+		syntax.walk(tree, node => {
 			if(node.type == 'ThisExpression')Object.assign(node, {
 				type: 'CallExpression',
 				callee: { type: 'Identifier', name: 'rw_this' },
@@ -530,7 +530,7 @@ module.exports = class {
 		
 		// {"type":"ImportDeclaration","start":0,"end":44,"specifiers":[{"type":"ImportSpecifier","start":9,"end":17,"imported":{"type":"Identifier","start":9,"end":17,"name":"Recorder"},"local":{"type":"Identifier","start":9,"end":17,"name":"Recorder"}}],"source":{"type":"Literal","start":25,"end":43,"value":"./js/Recorder.js","raw":"'./js/Recorder.js'"}}
 		
-		parsed.body.forEach((node, ind) => {
+		tree.body.forEach((node, ind) => {
 			// first level body
 			if(node.type == 'ImportDeclaration'){
 				node.source.value = this.url(node.source.value, data);
@@ -571,7 +571,7 @@ module.exports = class {
 				exports.push(node);
 				
 				// replace in array
-				parsed.body.splice(ind, 1, {
+				tree.body.splice(ind, 1, {
 					type: 'VariableDeclaration',
 					declarations: exps.map(([ exp, id ]) => ({
 						type: 'VariableDeclarator',
@@ -588,7 +588,7 @@ module.exports = class {
 			});
 		});
 		
-		parsed.body = [ lets.length ? {
+		tree.body = [ lets.length ? {
 			type: 'VariableDeclaration',
 			kind: 'let',
 			declarations: lets.map(name => ({
@@ -602,19 +602,19 @@ module.exports = class {
 		} : null ].concat({
 			type: 'Identifier',
 			name: 'let fills=' + (data.global == true ? '$rw.fills' : `new(_=>_).constructor('return this')().$rw?$rw.fills:new((compact=>(compact=()=>{${this.compact};return require},compact()('./index.js')))())(${this.str_conf()}).globals(${this.wrap(data.url)})`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';\n' + (data.append_fills || ''),
-		}, parsed.body).filter(val => val && !val.delete);
+		}, tree.body).filter(val => val && !val.delete);
 		
-		parsed.body = [
+		tree.body = [
 			...imports,
 			{
 				type: 'BlockStatement',
-				body: parsed.body,
+				body: tree.body,
 			},
 			...exports,
 		];
 		
 		// true
-		return syntax.string(parsed, { format: { compact: false } });
+		return syntax.string(tree, { format: { compact: false } });
 	}
 	xsl(value, data = {}){
 		if(!value)return value;
@@ -1446,7 +1446,7 @@ module.exports = class {
 			$rw.origina.set(fills.doc, def.doc);
 		}
 		
-		global.rw_this = that => def.proxify(that)[0];
+		global.rw_this = that => $rw.proxied.has(that) ? $rw.proxied.get(that) : that;
 		// get scope => eval inside of scope
 		global.rw_eval = script => script ? '(()=>' + this.js('eval(' + JSON.stringify(script) + ')', def.rw_data({ global: true, append_fills: 'return ', rewrite_eval: false })) + ')()' : script;
 		
