@@ -13,46 +13,14 @@ var fs = require('fs'),
 			cert: fs.readFileSync(path.join(__dirname, 'ssl.crt'), 'utf8'),
 		} : false,
 		log_ready: true,
-	}),
-	rw = new rewriter({
-		prefix: '/service',
-		codec: rewriter.codec.xor,
-		server: server,
-		title: 'Service',
-		interface: config.interface,
-	}),
-	add_proto = url => (!/^(?:f|ht)tps?\:\/\//.test(url)) ? 'https://' + url : url,
-	is_url = str => (/^https?:\/{2}|\S+\./g).test(str),
-	gateway = (req, res) => {
-		var data = req.method == 'GET' ? req.query : req.body;
-		
-		if(!data.url)return res.cgi_status(400, 'Missing `url` param');
-		
-		var url = req.method == 'GET' ? rewriter.codec.base64.decode(data.url) : data.url;
-		
-		url = is_url(url) ? add_proto(url) : 'https://www.google.com/search?q=' + encodeURIComponent(url);
-		
-		switch(req.query.route){
-			case'vi':
-				
-				res.cookies.gateway = { value: 'vi' };
-				res.redirect('/' + encodeURI(url));
-				
-				break;
-			case'ap':
-				
-				res.cookies.gateway = { value: 'ap' };
-				res.redirect('/session?url=' + encodeURIComponent(rewriter.codec.base64.encode(url)));
-				
-				break;
-			default:
-				
-				res.cookies.gateway = { value: 'sp' };
-				res.redirect(rw.url(url, { type: data.type, origin: req.url }));
-				
-				break;
-		}
-	};
+	});
 
-server.use('/prox', gateway);
-server.use('/gateway', gateway);
+server.config.global.rw = new rewriter({
+	prefix: '/service',
+	codec: rewriter.codec.xor,
+	server: server,
+	title: 'Service',
+	interface: config.interface,
+});
+
+server.use('/gateway', (req, res) => res.static(path.join(server.config.static, 'gateway.php')));

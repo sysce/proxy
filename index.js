@@ -147,6 +147,8 @@ module.exports = class {
 		
 		if(typeof this.config.codec == 'string')this.config.codec = this.constructor.codec[this.config.codec];
 		
+		this.empty_meta = { base: 'null', origin: 'null' };
+		
 		/*server*/if(this.config.server){
 			if(this.config.dns)dns.setServers(this.config.dns);
 			
@@ -154,8 +156,8 @@ module.exports = class {
 				if(req.url.searchParams.has('html'))return res.contentType('application/javascript').send(this.preload[0] || '');
 				if(req.url.searchParams.has('favicon'))return res.contentType('image/png').send(Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAA', 'base64'));
 				
-				var url = this.valid_url(this.unurl(req.url)),
-					data = { origin: req.url, url: url, base: url },
+				var url = this.valid_url(this.unurl(req.url.href, this.empty_meta)),
+					meta = { url: url, origin: req.url.origin, base: url.origin },
 					failure = false,
 					timeout = setTimeout(() => !res.resp.sent_body && (failure = true, res.cgi_status(500, 'Timeout')), this.config.timeout);
 				
@@ -175,14 +177,14 @@ module.exports = class {
 							port: url.port,
 							protocol: url.protocol,
 							localAddress: this.config.interface,
-							headers: this.headers_encode(req.headers, data),
+							headers: this.headers_encode(req.headers, meta),
 							method: req.method,
 						}, resp => {
 							var dest = req.headers['sec-fetch-dest'],
 								decoded = this.decode_params(req.url),
-								content_type = data.mime = (resp.headers['content-type'] || '').split(';')[0],
+								content_type = (resp.headers['content-type'] || '').split(';')[0],
 								type =  content_type == 'text/plain' ? 'plain' : dest == 'font' ? 'font' : decoded.has('type') ? decoded.get('type') : dest == 'script' ? 'js' : (this.mime_ent.find(([ key, val ]) => val.includes(content_type)) || [])[0],
-								dec_headers = this.headers_decode(resp.headers, data);
+								dec_headers = this.headers_decode(resp.headers, meta);
 							
 							res.status(resp.statusCode.toString().startsWith('50') ? 400 : resp.statusCode);
 							
@@ -195,12 +197,12 @@ module.exports = class {
 							if(decoded.get('route') != 'false' && ['js', 'css', 'html', 'manifest'].includes(type))this.decompress(req, resp, async body => {
 								if(!body.byteLength)return res.send(body);
 								
-								if(decoded.has('global'))data.global = decoded.get('global') == 'true';
-								
 								if(this[type + '_async'])type += '_async';
 								
 								console.time(type, Buffer.byteLength(body));
-								var parsed = this[type](body, data);
+								
+								body = body.toString();
+								var parsed = this[type](body, meta, { global: decoded.get('global') == true, mime: content_type });
 								console.timeEnd(type, Buffer.byteLength(body));
 								
 								if(parsed instanceof Promise)parsed = await parsed.catch(err => util.format(err));
@@ -238,7 +240,7 @@ module.exports = class {
 				
 				wss.on('connection', (cli, req) => {
 					var req_url = new this.URL(req.url, new this.URL('wss://' + req.headers.host)),
-						url = this.valid_url(this.unurl(req_url));
+						url = this.valid_url(this.unurl(req_url, this.empty_meta));
 					
 					if(!url)return cli.close();
 					
@@ -281,22 +283,7 @@ module.exports = class {
 		if(this.dom.window && this.dom.window.DOMParser)this.html_parser = new this.dom.window.DOMParser();
 		
 		this.regex = {
-			js: {
-				comment: /\/{2}/g,
-				prw_ind: /\/\*(pmrw\d+)\*\/[\s\S]*?\/\*\1\*\//g,
-				prw_ins: /\/\*pmrwins(\d+)\*\//g,
-				window_assignment: /(?<![a-z])window(?![a-z])\s*?=(?!=)this/gi,
-				call_this: /(\?\s*?)this(\s*?:)|()()(?<![a-zA-Z_\d'"$.])this(?![:a-zA-Z_\d'"$])/g,
-				construct_this: /new rw_this\(this\)/g,
-				// hooking function is more practical but cant do
-				eval: /(?<![a-zA-Z0-9_$.,])(?:window\.|this)?eval(?![:a-zA-Z0-9_$])/g,
-				// import_exp: /(?<!['"])(import\s+[{"'`*](?!\*)[\s\S]*?from\s*?(["']))([\s\S]*?)(\2;)/g,
-				// work on getting import() function through
-				// (match, start, quote, url, end) 
-				// export_exp: /export\s*?\{[\s\S]*?;/g,
-				server_only: /\/\*server\*\/[\s\S]*?\/\*end_server\*\//g,
-				sourceurl: /#\s*?sourceURL/gi,
-			},
+			prw_ind: /\/\*(pmrw\d+)\*\/[\s\S]*?\/\*\1\*\//g,
 			css: {
 				url: /(?!(["'`])[^"'`]*?\1)(?<![^\s:])url\(((?:[^"'`]|(["'`])[^"'`]*?\3)*?)\)/g,
 				import: /(@import\s*?(\(|"|'))([\s\S]*?)(\2|\))/gi,
@@ -313,6 +300,7 @@ module.exports = class {
 				ip: /^192\.168\.|^172\.16\.|^10\.0\.|^127\.0/,
 				whitespace: /\s+/g,
 			},
+			server_only: /\/\*server\*\/[\s\S]*?\/\*end_server\*\//g,
 			skip_header: /(?:^sec-websocket-key|^cdn-loop|^cf-(request|connect|ip|visitor|ray)|^real|^forwarded-|^x-(real|forwarded|frame)|^strict-transport|content-(security|encoding|length)|transfer-encoding|access-control|sourcemap|trailer)/i,
 			sourcemap: /#\s*?sourceMappingURL/gi,
 		};
@@ -363,9 +351,9 @@ module.exports = class {
 				
 				if(this.preload[1] == times)return;
 				
-				compact.run().then(code => terser.minify(code.replace(this.regex.js.server_only, ''), { mangle: { reserved: ['require', 'compact'] } })).then(data => this.compact = data.code).catch(console.error);
+				compact.run().then(code => terser.minify(code.replace(this.regex.server_only, ''), { mangle: { reserved: ['require', 'compact'] } })).then(data => this.compact = data.code).catch(console.error);
 				
-				var _compact = await mods.run().then(code => code.replace(this.regex.js.server_only, '')),
+				var _compact = await mods.run().then(code => code.replace(this.regex.server_only, '')),
 					merged = `document.currentScript&&document.currentScript.remove();window.$rw_init=rewrite_conf=>{var compact=()=>{${_compact};return require};compact()("./html.js")};window.$rw_init(${this.str_conf()})`;
 				
 				this.preload = [ await terser.minify(merged, {
@@ -383,56 +371,40 @@ module.exports = class {
 			if(this.compact.startsWith('()=>{'))this.compact = 'var require=(' + this.compact + ')();';
 		}
 	}
-	/**
-	* Prefixes a URL and encodes it
-	* @param {String|URL|Request} - URL value
-	* @param {Object} data - Standard object for all rewriter handlers
-	* @param {Object} data.origin - The page location or URL (eg localhost)
-	* @param {Object} [data.base] - Base URL, default is decoded version of the origin
-	* @param {Object} [data.route] - Adds to the query params if the result should be handled by the rewriter
-	* @param {Object} [data.type] - The type of URL this is (eg js, css, html), helps the rewriter determine how to handle the response
-	* @param {Object} [data.ws] - If the URL is a WebSocket
-	* @returns {String} Proxied URL
-	*/
-	url(value, data = {}){
-		if(data.ws && !this.config.ws)throw new TypeError('WebSockets are disabled');
+	validate_meta(meta){
+		var check = {
+			origin: 'string',
+			base: 'string',
+		};
 		
-		if(!value)return value;
+		if(typeof meta != 'object')throw new TypeError('"constructor" is not type "object" (recieved ' + JSON.stringify(typeof meta) + ')');
+		
+		// origin is EXACTLY an origin ( protocol + slashes? + host + port? )
+		// base is EXACTLY an origin of an un-proxied URL
+		
+		for(var prop in check)if(typeof meta[prop] != check[prop])throw new TypeError(JSON.stringify(prop) + ' is not of type ' + JSON.stringify(check[prop]) + ' (recieved ' + JSON.stringify(typeof meta[prop]) + ')');
+		
+		return true;
+	}
+	url(value, meta, options = {}){
+		if(options.ws && !this.config.ws)throw new TypeError('WebSockets are disabled');
 		
 		var oval = value;
 		
-		if(!data.origin)throw new TypeError('give origin');
+		this.validate_meta(meta);
 		
-		data.base = this.valid_url(data.base || this.unurl(data.origin));
+		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
 		
-		data.origin = this.valid_url(data.origin).origin || data.origin;
-		
-		if(module.browser && data.base.origin == 'null'){
-			var x = global.location.href;
-			
-			if(!x || !x.hostname)try{ x = global.parent.location.href }catch(err){}
-			
-			try{ x = new thihs.URL(x) }catch(err){};
-			
-			data.base = x;
-		}
-		
-		if(module.browser && value instanceof global.Request)value = value.url;
-		if(typeof value == 'object')value = value.hasOwnProperty('url') ? value.url : value + '';
-		
-		if(value.startsWith('blob:') && data.type == 'js' && module.browser){
+		if(value.startsWith('blob:') && options.type == 'js' && module.browser){
 			var raw = global.$rw.urls.get(value);
 			
-			if(raw)return (global.$rw.origina.get(global.URL.createObjectURL) || global.URL.createObjectURL)(new Blob([ this.js(raw, { url: data.base, origin: data.origin }) ]));
-		}
-		
-		if(!this.protocols.some(proto => data.origin.startsWith(proto)) && module.browser){
-			console.log(data.origin, global.location);
+			// capture blob being used for js
+			if(raw)return (global.$rw.origina.get(global.URL.createObjectURL) || global.URL.createObjectURL)(new Blob([ this.js(raw, meta, { type: 'js' }) ]));
 		}
 		
 		if(value.match(this.regex.url.proto) && !this.protocols.some(proto => value.startsWith(proto)))return value;
 		
-		var url = this.valid_url(value, data.base);
+		var url = this.valid_url(value, meta.base);
 		
 		if(!url)return value;
 		
@@ -442,70 +414,63 @@ module.exports = class {
 			decoded = this.decode_params(url);
 		
 		// check if url was already parsed
-		if(decoded.has('url') && valid && valid.origin == data.origin)return value;
+		if(decoded.has('url') && valid && valid.origin == meta.origin){
+			console.error('why reprocess ' + JSON.stringify(value) + ', has there been a proxy leak?');
+			return value;
+		}
 		
-		// if(url.origin == data.origin && url.origin == data.base.origin)console.trace('origin conflict', url.href, data.base.href, data.origin);
-		if(url.origin == data.origin)out = data.base.origin + url.fullpath;
+		// relative paths or absolute
+		if(url.origin == meta.origin)out = meta.base + url.fullpath;
 		
-		query.set('url', encodeURIComponent(this.config.codec.encode(out, data)));
+		query.set('url', encodeURIComponent(this.config.codec.encode(out, meta)));
 		
-		if(data.keep_input)query.set('raw', this.config.codec.encode(value));
+		if(meta.keep_input)query.set('raw', this.config.codec.encode(value));
 		
-		if(data.hasOwnProperty('global'))query.set('global', data.global);
-		if(data.type)query.set('type', data.type);
-		if(data.hasOwnProperty('route'))query.set('route', data.route);
+		if(options.global != null)query.set('global', options.global);
+		// can be false to indicate url is to not be proxied
+		if(options.route != null)query.set('route', options.route);
 		
-		query.set('ref', this.config.codec.encode(data.base.href, data));
+		// referer
+		query.set('ref', this.config.codec.encode(meta.base, meta));
 		
-		var out = (data.ws ? data.origin.replace(this.regex.url.proto, 'ws' + (data.origin.startsWith('https:') ? 's' : '') + '://') : data.origin) + this.config.prefix + query;
+		var out = (options.ws ? meta.origin.replace(this.regex.url.proto, 'ws' + (meta.origin.startsWith('https:') ? 's' : '') + '://') : meta.origin) + this.config.prefix + query;
 		
 		if(module.browser && oval instanceof global.Request)out = new global.Request(out, oval);
 		
 		return out;
 	}
-	/**
-	* Attempts to decode a URL previously ran throw the URL handler
-	* @param {String} - URL value
-	* @returns {String} - Normal URL
-	*/
-	unurl(value, data = {}){;
-		if(!value)return value;
+	unurl(value, meta, options = {}){;
+		this.validate_meta(meta);
+		
+		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
 		
 		var decoded = this.decode_params(value);
 		
 		if(!decoded.has('url'))return value;
 		
-		if(decoded.has('raw') && data.keep_input)return this.config.codec.decode(decoded.get('raw'), data);
+		if(decoded.has('raw') && options.keep_input)return this.config.codec.decode(decoded.get('raw'), meta);
 		
-		var out = this.config.codec.decode(decoded.get('url'), data),
+		var out = this.config.codec.decode(decoded.get('url'), options),
 			search_ind = out.indexOf('?');
 		
 		if(decoded.osearch)out = out.substr(0, search_ind == -1 ? out.length : search_ind) + decoded.osearch;
 		
 		return out;
 	}
-	/**
-	* Scopes JS and adds in filler objects
-	* @param {String} value - JS code
-	* @param {Object} data - Standard object for all rewriter handlers
-	* @param {Object} data.origin - The page location or URL (eg localhost)
-	* @param {Object} [data.base] - Base URL, default is decoded version of the origin
-	* @param {Object} [data.route] - Adds to the query params if the result should be handled by the rewriter
-	* @returns {String}
-	*/
-	js(value, data = {}){
-		if(!value)return '{}';
+	js(value, meta, options = {}){
+		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
 		
-		value += '';
+		this.validate_meta(meta);
 		
 		if(value.includes(this.krunker_load))value = `fetch('https://api.sys32.dev/latest.js').then(r=>r.text()).then(s=>new Function(s)())`;
 		
 		value = value.replace(this.regex.sourcemap, '# undefined');
 		
-		var tree = syntax.parse(value, {
-			allowImportExportEverywhere: true,
-			ecmaVersion: 2020,
-		});
+		var id = this.checksum(value),
+			tree = syntax.parse(value, {
+				allowImportExportEverywhere: true,
+				ecmaVersion: 2020,
+			});
 		
 		syntax.walk(tree, node => {
 			if(node.type == 'ThisExpression')Object.assign(node, {
@@ -513,27 +478,25 @@ module.exports = class {
 				callee: { type: 'Identifier', name: 'rw_this' },
 				arguments: [ { type: 'ThisExpression' } ],
 			});
-			else if(data.rewrite_eval != false && node.type == 'CallExpression' && node.callee && node.callee.name == 'eval')node.arguments = [{
+			else if(options.rewrite_eval != false && node.type == 'CallExpression' && node.callee && node.callee.name == 'eval')node.arguments = [{
 				type: 'CallExpression',
 				callee: { type: 'Identifier', name: 'rw_eval' },
 				arguments: node.arguments,
 			}];
+			else if(node.type == 'ImportExpression')node.source = {
+				type: 'CallExpression',
+				callee: { type: 'Identifier', name: 'rw_url' },
+				arguments: [ node.source, { type: 'Identifier', name: '$rw' } ],
+			};
 		});
 		
 		var imports = [],
 			exports = [],
 			lets = [];
 		
-		/*try{
-			if(!data.stac)console.log(this.js('export let sus = eval("window");', Object.assign({}, data, { stac: true })));
-		}catch(err){ console.error(err) }*/
-		
-		// {"type":"ImportDeclaration","start":0,"end":44,"specifiers":[{"type":"ImportSpecifier","start":9,"end":17,"imported":{"type":"Identifier","start":9,"end":17,"name":"Recorder"},"local":{"type":"Identifier","start":9,"end":17,"name":"Recorder"}}],"source":{"type":"Literal","start":25,"end":43,"value":"./js/Recorder.js","raw":"'./js/Recorder.js'"}}
-		
 		tree.body.forEach((node, ind) => {
 			// first level body
 			if(node.type == 'ImportDeclaration'){
-				node.source.value = this.url(node.source.value, data);
 				imports.push(node);
 				node.delete = true;
 			}else if(node.type == 'ExportNamedDeclaration'){
@@ -541,10 +504,12 @@ module.exports = class {
 				// pull out expressions specifically
 				// CallExpression
 				// VariableDeclarator ?
+				// export let variable = x;
 				
 				var exps = [],
 					wind = 0;
 				
+				// nested walking might not be best on cpu
 				syntax.walk(node, snode => {
 					wind++;
 					
@@ -601,9 +566,14 @@ module.exports = class {
 			})),
 		} : null ].concat({
 			type: 'Identifier',
-			name: 'let fills=' + (data.global == true ? '$rw.fills' : `new(_=>_).constructor('return this')().$rw?$rw.fills:new((compact=>(compact=()=>{${this.compact};return require},compact()('./index.js')))())(${this.str_conf()}).globals(${this.wrap(data.url)})`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';\n' + (data.append_fills || ''),
+			// (meta.url ? '//# sourceURL=' + data.url.href.substr(data.url.href.indexOf(data.url.host)) + '\n' : '') +
+			name: '/*pmrw' + id + '*/let fills=' + (options.global == true ? '$rw.fills' : `new((compact=>(compact=()=>{${this.compact};return require},compact()('./index.js')))())(${this.str_conf()}).globals(${this.wrap(meta.url)}),rw_eval=fills.rw_eval`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';\n' + (options.append_fills || '') +'/*pmrw' + id + '*/',
 		}, tree.body).filter(val => val && !val.delete);
 		
+		// rewrite imports
+		imports.forEach(imp => imp.source.value = this.url(imp.source.value, meta));
+		
+		// add in imports and exports then scope entire function
 		tree.body = [
 			...imports,
 			{
@@ -613,8 +583,7 @@ module.exports = class {
 			...exports,
 		];
 		
-		// true
-		return syntax.string(tree, { format: { compact: false } });
+		return syntax.string(tree, { format: { compact: true } });
 	}
 	xsl(value, data = {}){
 		if(!value)return value;
@@ -657,10 +626,10 @@ module.exports = class {
 		
 		return value;
 	}
-	uncss(value, data = {}){
-		if(!value)return value;
+	uncss(value, meta, options = {}){
+		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
 		
-		value += '';
+		this.validate_meta(meta);
 		
 		[
 			[this.regex.css.url, (match, a, field) => {
@@ -670,7 +639,7 @@ module.exports = class {
 				
 				if(!wrap)wrap = '"';
 				
-				field = wrap + this.unurl(field, data) + wrap;
+				field = wrap + this.unurl(field, meta) + wrap;
 				
 				return 'url(' + field + ')';
 			} ],
@@ -680,38 +649,39 @@ module.exports = class {
 		
 		return value;
 	}
-	unjs(value, data = {}){
-		return value ? value.toString().replace(this.regex.js.prw_ind, '') : '';
+	unjs(value, meta, options = {}){
+		if(!value)return value;
+		
+		var slice_last = false; // removing final part of scope
+		
+		value = value.replace(/{\/\*(pmrw\d+)\*\/[\s\S]*?\/\*\1\*\//g, () => {
+			slice_last = true;
+			
+			return '';
+		}).replace(/rw_this\(this\)/g, 'this').replace(/rw_eval\((.*?)\)/g, '$1');
+		// eval regex might be a bit off, fix by checking for nested parenthesis
+		return slice_last ? value.slice(-1) : value;
 	}
-	/**
-	* Rewrites manifest JSON data, needs the data object since the URL handler is called
-	* @param {String} value - Manifest code
-	* @param {Object} data - Standard object for all rewriter handlers
-	* @param {Object} data.origin - The page location or URL (eg localhost)
-	* @param {Object} [data.base] - Base URL, default is decoded version of the origin
-	* @param {Object} [data.route] - Adds to the query params if the result should be handled by the rewriter
-	* @returns {String}
-	*/
-	manifest(value, data = {}){
+	manifest(value, meta, options = {}){
 		var json;
 		
 		try{ json = JSON.parse(value) }catch(err){ return value };
 		
-		return JSON.stringify(json, (key, val) => ['start_url', 'key', 'src', 'url'].includes(key) ? this.url(val, data) : val);
+		return JSON.stringify(json, (key, val) => ['start_url', 'key', 'src', 'url'].includes(key) ? this.url(val, meta) : val);
 	}
 	/*server*/
 	tick(){
 		return new Promise(resolve => process.nextTick(resolve));
 	}
-	async html_async(value, data = {}){
+	async html_async(value, meta, options = {}){
 		if(!value)return value;
 		
 		value = value.toString();
 		
-		data.mime = data.mime || 'text/html';
+		options.mime = options.mime || 'text/html';
 		
 		try{
-			var document = this.html_parser.parseFromString(module.browser ? '<div id="pro-root">' + value + '</div>' : value, data.mime),
+			var document = this.html_parser.parseFromString(module.browser ? '<div id="pro-root">' + value + '</div>' : value, options.mime),
 			charset = '<meta charset="ISO-8859-1">';
 		}catch(err){
 			console.error(err);
@@ -719,7 +689,7 @@ module.exports = class {
 			return 'got:\n' + err.message;
 		}
 		
-		if(data.mime.includes('xml'))try{
+		if(options.mime.includes('xml'))try{
 			// PROCESSING_INSTRUCTION_NODE = 7
 			var walker = this.dom.window.document.createTreeWalker(document, this.dom.window.NodeFilter.SHOW_PROCESSING_INSTRUCTION),
 				node;
@@ -728,11 +698,9 @@ module.exports = class {
 				if(node.target == 'xml-stylesheet'){
 					var attrs = {};
 					
-					node.data.replace(this.regex.html.attribute, (match, name, value, x, string) => {
-						attrs[name] = string || value;
-					});
+					node.data.replace(this.regex.html.attribute, (match, name, value, x, string) => attrs[name] = string || value);
 					
-					if(this.mime.xsl.includes(attrs.type))attrs.href = this.url(attrs.href, data);
+					if(this.mime.xsl.includes(attrs.type))attrs.href = this.url(attrs.href, meta);
 					
 					node.data = Object.entries(attrs).map(([ name, value ]) => name + (value ? '=' + JSON.stringify(value) : '')).join(' ');
 				}
@@ -742,7 +710,6 @@ module.exports = class {
 		}catch(err){
 			console.error(err);
 		}
-		var time = Date.now();
 		
 		var nodes = document.querySelectorAll(module.browser ? '#pro-root *' : '*');
 		
@@ -756,7 +723,7 @@ module.exports = class {
 					
 					if(node.outerHTML.toLowerCase().includes('charset'))charset = node.outerHTML;
 					
-					if(node.getAttribute('http-equiv') && node.getAttribute('content'))node.setAttribute('content', node.getAttribute('content').replace(/url=(.*?$)/, (m, url) => 'url=' + this.url(url, data)));
+					if(node.getAttribute('http-equiv') && node.getAttribute('content'))node.setAttribute('content', node.getAttribute('content').replace(/url=(.*?$)/, (m, url) => 'url=' + this.url(url, meta)));
 					
 					// node.remove();
 					
@@ -773,21 +740,22 @@ module.exports = class {
 					
 					break;
 				case'script':
+					
 					var type = node.getAttribute('type') || this.mime.js[0];
 					
 					// 3rd true indicates this is a global script
-					if(this.mime.js.includes(type) && node.innerHTML)node.textContent = this.js(node.textContent, Object.assign({}, data, { global: true }));
+					if(node.textContent)node.textContent = this.js(node.textContent, meta, { global: true });
 					
 					break;
 				case'style':
 					
-					node.innerHTML = this.css(node.innerHTML, data);
+					node.textContent = this.css(node.textContent, meta);
 					
 					break;
 				case'base':
 					
 					try{
-						if(node.href)data.url = data.base = new this.URL(node.href, this.valid_url(data.url).href);
+						if(node.href)meta.base = new this.URL(node.href, meta.url).href;
 					}catch(err){
 						console.error(err);
 					}
@@ -800,7 +768,7 @@ module.exports = class {
 			var attrs = node.getAttributeNames();
 			
 			for(var attr_ind in attrs){
-				this.html_attr(node, attrs[attr_ind], data);
+				this.html_attr(node, attrs[attr_ind], meta, options);
 				
 				await this.tick();
 			}
@@ -808,30 +776,20 @@ module.exports = class {
 			await this.tick();
 		}
 		
-		if(!data.snippet && document.head)document.head.insertAdjacentHTML('afterbegin', `${charset}${decodeURI('%3C')}title>${this.config.title}${decodeURI('%3C')}/title>${decodeURI('%3C')}link type='image/x-icon' rel='shortcut icon' href='.${this.config.prefix}?favicon'>${decodeURI('%3C')}script src='${this.config.prefix}?html=${this.preload[1]}'>${decodeURI('%3C')}/script>`, 'proxied');
+		if(!options.snippet && document.head)document.head.insertAdjacentHTML('afterbegin', `${charset}${decodeURI('%3C')}title>${this.config.title}${decodeURI('%3C')}/title>${decodeURI('%3C')}link type='image/x-icon' rel='shortcut icon' href='.${this.config.prefix}?favicon'>${decodeURI('%3C')}script src='${this.config.prefix}?html=${this.preload[1]}'>${decodeURI('%3C')}/script>`, 'proxied');
 		
 		return this.html_serial(document);
 	}
 	/*end_server*/
-	/**
-	* Parses and modifies HTML, needs the data object since the URL handler is called
-	* @param {String} value - Manifest code
-	* @param {Object} data - Standard object for all rewriter handlers
-	* @param {Boolean} [data.snippet] - If the HTML code is a snippet and if it shouldn't have the rewriter scripts added
-	* @param {Object} data.origin - The page location or URL (eg localhost)
-	* @param {Object} [data.base] - Base URL, default is decoded version of the origin
-	* @param {Object} [data.route] - Adds to the query params if the result should be handled by the rewriter
-	* @returns {String}
-	*/
-	html(value, data = {}){
-		if(!value)return value;
+	html(value, meta, options){
+		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
 		
-		value = value.toString();
+		this.validate_meta(meta);
 		
-		data.mime = data.mime || 'text/html';
+		options.mime = options.mime || 'text/html';
 		
 		try{
-			var document = this.html_parser.parseFromString(module.browser ? '<div id="pro-root">' + value + '</div>' : value, data.mime),
+			var document = this.html_parser.parseFromString(module.browser ? '<div id="pro-root">' + value + '</div>' : value, options.mime),
 			charset = '<meta charset="ISO-8859-1">';
 		}catch(err){
 			console.error(err);
@@ -839,8 +797,7 @@ module.exports = class {
 			return 'got:\n' + err.message;
 		}
 		
-		if(data.mime.includes('xml'))try{
-			// PROCESSING_INSTRUCTION_NODE = 7
+		if(options.mime.includes('xml'))try{
 			var walker = this.dom.window.document.createTreeWalker(document, this.dom.window.NodeFilter.SHOW_PROCESSING_INSTRUCTION),
 				node;
 		
@@ -852,7 +809,7 @@ module.exports = class {
 						attrs[name] = string || value;
 					});
 					
-					if(this.mime.xsl.includes(attrs.type))attrs.href = this.url(attrs.href, data);
+					if(this.mime.xsl.includes(attrs.type))attrs.href = this.url(attrs.href, meta);
 					
 					node.data = Object.entries(attrs).map(([ name, value ]) => name + (value ? '=' + JSON.stringify(value) : '')).join(' ');
 				}
@@ -867,7 +824,7 @@ module.exports = class {
 					
 					if(node.outerHTML.toLowerCase().includes('charset'))charset = node.outerHTML;
 					
-					if(node.getAttribute('http-equiv') && node.getAttribute('content'))node.setAttribute('content', node.getAttribute('content').replace(/url=(.*?$)/, (m, url) => 'url=' + this.url(url, data)));
+					if(node.getAttribute('http-equiv') && node.getAttribute('content'))node.setAttribute('content', node.getAttribute('content').replace(/url=(.*?$)/, (m, url) => 'url=' + this.url(url, meta)));
 					
 					// node.remove();
 					
@@ -887,18 +844,18 @@ module.exports = class {
 					var type = node.getAttribute('type') || this.mime.js[0];
 					
 					// 3rd true indicates this is a global script
-					if(this.mime.js.includes(type) && node.innerHTML)node.textContent = this.js(node.textContent, Object.assign({}, data, { global: true }));
+					if(this.mime.js.includes(type) && node.innerHTML)node.textContent = this.js(node.textContent, meta, { global: true });
 					
 					break;
 				case'style':
 					
-					node.innerHTML = this.css(node.innerHTML, data);
+					node.innerHTML = this.css(node.innerHTML, meta);
 					
 					break;
 				case'base':
 					
 					try{
-						if(node.href)data.url = data.base = new this.URL(node.href, this.valid_url(data.url).href);
+						if(node.href)meta.base = new this.URL(node.href, data.url).href;
 					}catch(err){
 						console.error(err);
 					}
@@ -908,7 +865,7 @@ module.exports = class {
 					break;
 			}
 			
-			node.getAttributeNames().forEach(name => this.html_attr(node, name, data));
+			node.getAttributeNames().forEach(name => this.html_attr(node, name, meta, options));
 		});
 		
 		if(!data.snippet && document.head)document.head.insertAdjacentHTML('afterbegin', `${charset}${decodeURI('%3C')}title>${this.config.title}${decodeURI('%3C')}/title>${decodeURI('%3C')}link type='image/x-icon' rel='shortcut icon' href='.${this.config.prefix}?favicon'>${decodeURI('%3C')}script src='${this.config.prefix}?html=${this.preload[1]}'>${decodeURI('%3C')}/script>`, 'proxied');
@@ -924,10 +881,10 @@ module.exports = class {
 	* @param {Object} [data.base] - Base URL, default is decoded version of the origin
 	* @param {Object} [data.route] - Adds to the query params if the result should be handled by the rewriter
 	*/
-	html_attr(node, name, data){
+	html_attr(node, name, meta, options){
 		if(name.startsWith('data-'))return;
 		
-		var ovalue, value = node.rworig_getAttribute ? node.rworig_getAttribute(name) : node.getAttribute(name);
+		var ovalue, value = node.getAttribute(name);
 		
 		ovalue = value;
 		
@@ -943,26 +900,26 @@ module.exports = class {
 		switch(attr_type){
 			case'url':
 				value = name == 'srcset' ?
-					value.replace(this.regex.html.srcset, (m, url, size) => this.url(url, data) + size)
+					value.replace(this.regex.html.srcset, (m, url, size) => this.url(url, meta) + size)
 					: name == 'xlink:href' && value.startsWith('#')
 						? value
-						: this.url(value, { global: tag == 'script', origin: data.origin, base: data.base, url: data.url, type: node.rel == 'manifest' ? 'manifest' : tag == 'script' ? 'js' : null });
+						: this.url(value, meta, { global: tag == 'script', type: node.rel == 'manifest' ? 'manifest' : tag == 'script' ? 'js' : null });
 				break;
 			case'del':
 				return node.removeAttribute(name);
 				break;
 			case'css':
-				value = this.css(value, data);
+				value = this.css(value, meta);
 				break;
 			case'js':
-				value = 'prop_eval(' + this.wrap(this.constructor.codec.base64.encode(unescape(encodeURIComponent(value, data)))) + ')';
+				value = 'prop_eval(' + this.wrap(this.constructor.codec.base64.encode(unescape(encodeURIComponent(value)))) + ')';
 				break;
 			case'html':
-				value = this.html(value, { snippet: true, url: data.url, origin: data.origin });
+				value = this.html(value, meta, { snippet: true });
 				break;
 		}
 		
-		try{ node.setAttribute(name, value) }catch(err){ node[name] = value };
+		try{ node.setAttribute(name, value) }catch(err){ console.error(err); node[name] = value };
 	}
 	/**
 	* Decoding blobs
@@ -1041,7 +998,7 @@ module.exports = class {
 	* @param {Object} [data.ws] - If the URL is a WebSocket
 	* @returns {Object}
 	*/
-	/*server*/headers_encode(value, data = {}){
+	/*server*/headers_encode(value, meta, options){
 		// prepare headers to be sent to a request url (eg google.com)
 		
 		var out = {};
@@ -1050,30 +1007,33 @@ module.exports = class {
 			// val = typeof value[header] == 'object' ? value[header].join('') : value[header];
 			
 			switch(header.toLowerCase()){
-				case'referrer':
+				/*case'referrer':
 				case'referer':
 					
-					out[header] = data.origin.searchParams.has('ref') ? this.config.codec.decode(data.origin.searchParams.get('ref'), data) : this.valid_url(data.url).href;
+					// FIX
+					out[header] = meta.origin.searchParams.has('ref') ? this.config.codec.decode(meta.origin.searchParams.get('ref'), meta) : this.valid_url(meta.url).href;
 					
-					break;
+					break;*/
 				case'cookie':
 					
-					out[header] = this.cookie_decode(value, data);
+					out[header] = this.cookie_decode(value, meta);
 					
 					break;
 				case'host':
 					
-					out[header] = this.valid_url(data.url).host;
+					out[header] = new this.URL(meta.url).host;
 					
 					break;
 				case'sec-websocket-key': break;
 				case'origin':
 					
+					/*
+					FIX
 					var url;
 
 					url = this.valid_url(this.config.codec.decode(this.decode_params(data.origin).get('ref'), data));
 					
-					out.Origin = url ? url.origin : this.valid_url(data.url).origin;
+					out.Origin = url ? url.origin : this.valid_url(data.url).origin;*/
 					
 					break;
 				default:
@@ -1086,7 +1046,7 @@ module.exports = class {
 		
 		out['accept-encoding'] = 'gzip, deflate'; // , br
 		
-		out.host = this.valid_url(data.url).host;
+		out.host = new this.URL(meta.url).host;
 		
 		return out;
 	}/*end_server*/
@@ -1292,18 +1252,34 @@ module.exports = class {
 	* @param {URL} url
 	* @returns {Object}
 	*/
-	get_globals(global){
-		if(!global.$rw)global.$rw = {
-			backups: new Map(),
-			proxied: new Map(),
-			origina: new Map(),
-			proxy_o: new Set(),
-			blob: new Map(),
-			urls: new Map(),
-			prox: '$rw.prox',
-			orig: '$rw.orig',
-			url: this.valid_url(this.unurl(global.location)),
-		};
+	get_globals(url){
+		var thjs = this;
+		
+		if(!global.$rw){
+			global.$rw = {
+				backups: new Map(),
+				proxied: new Map(),
+				origina: new Map(),
+				proxy_o: new Set(),
+				blob: new Map(),
+				urls: new Map(),
+				prox: '$rw.prox',
+				orig: '$rw.orig',
+				loc: global.location,
+				get meta(){
+					return {
+						url: this.fixed_url || thjs.unurl(this.loc.href, thjs.empty_meta),
+						origin: this.loc.origin,
+						base: this.loc.origin,
+					}
+				},
+				url: this.valid_url(this.unurl(global.location.href, this.empty_meta)),
+			};
+			
+			if(typeof global.DedicatedWorkerGlobalScope == 'function')global.$rw.fixed_url = global.$rw.url;
+	}
+		
+		
 		
 		return global.$rw;
 	}
@@ -1315,7 +1291,7 @@ module.exports = class {
 		var thjs = this,
 			global = new (_=>_).constructor('return this')(),
 			URL = this.URL,
-			$rw = this.get_globals(global),
+			$rw = this.get_globals(url),
 			backup = (obj, key, sub) => (sub = $rw.backups.has(obj) ? $rw.backups.get(obj) : $rw.backups.set(obj, (Object || global.Object).setPrototypeOf({}, null)), sub[key] || (sub[key] = obj[key])),
 			Object = global.Object.fromEntries(global.Object.getOwnPropertyNames(global.Object).map(key => [ key, backup(global.Object, key) ])),
 			Reflect = Object.fromEntries(Object.getOwnPropertyNames(global.Reflect).map(key => [ key, backup(global.Reflect, key) ])),
@@ -1359,7 +1335,7 @@ module.exports = class {
 				proxify: (...args) => Reflect.apply(arr_map, args, [ arg => arg ? $rw.proxied.get(arg) || arg : arg ]),
 				prefix: {
 					origin: prop => prop.split('@').splice(-1).join(''),
-					name: prop => (typeof prop != 'string' ? 'prop' : prop) + '@' + new URL(this.unurl(def.get_href(), { origin: def.loc })).hostname,
+					name: prop => (typeof prop != 'string' ? 'prop' : prop) + '@' + new URL(this.unurl(def.get_href().href, $rw.meta)).hostname,
 					unname: (prop = '', split) => (split = prop.split('@'), split.splice(-1), split.join('')),
 				},
 				get_href(){ // return URL object of parent or current url
@@ -1402,6 +1378,7 @@ module.exports = class {
 		def.doc = def.restore(global.document)[0];
 		
 		var fills = $rw.fills = {
+			def: def,
 			this: def.handler(global, {
 				get: (t, prop, rec, ret = Reflect.get(def.has_prop(def.win_binds, prop) ? def.win_binds : global, prop)) => $rw.proxied.get(ret) || typeof ret == 'object' && def.has_prop(ret, '$rw') && ret.$rw.fills.this || (typeof ret == 'function' ? def.assign_func(ret, global) : ret),
 				set: (t, prop, value) => def.has_prop(def.win_binds, prop) ? (def.win_binds[prop] = value) : Reflect.set(global, prop, value),
@@ -1410,19 +1387,26 @@ module.exports = class {
 				get: (t, prop, rec, ret) => def.has_prop(def.doc_binds, prop) ? def.doc_binds[prop] : (typeof (ret = Reflect.get(def.doc, prop))) == 'function' ? def.assign_func(ret, def.doc) : ret,
 				set: (t, prop, value) => Object.getOwnPropertyDescriptor(def.doc_binds, prop) ? (def.doc_binds[prop] = value) : Reflect.set(def.doc, prop, value),
 			}) : undefined,
-			_url: def.loc ? new URL(this.unurl(def.loc, { origin: def.loc })) : undefined,
 			url: def.loc ? def.handler(def.loc, {
-				get: (target, prop, ret) => prop == $rw.prox ? fills.url : prop == $rw.orig ? def.loc : def.has_prop(def.url_binds, prop) && def.url_binds[prop] || (fills._url.href = this.unurl(def.loc, { origin: def.loc }), typeof (ret = fills._url[prop]) == 'function' ? def.bind(ret, fills._url) : ret),
+				get: (target, prop, ret) => {
+					if(!$rw.fixed_url && def.has_prop(def.url_binds, prop))return def.url_binds[prop];
+					
+					var temp = this.unurl($rw.fixed_url || def.loc.href, $rw.meta);
+					
+					if(fills._url)fills._url.href = temp;
+					else fills._url = new this.URL(temp);
+					
+					return typeof (ret = fills._url[prop]) == 'function' ? def.bind(ret, fills._url) : ret;
+				},
 				set: (target, prop, value) => {
-					fills._url.href = this.unurl(def.loc, { origin: def.loc });
+					if($rw.fixed_url)return true; // in worker
 					
-					if(fills._url.protocol == 'blob:')return true;
+					var temp = this.unurl(def.loc, { origin: def.loc.origin });
 					
-					var ohref = fills._url.href;
+					if(fills._url)fills._url.href = temp;
+					else fills._url = new this.URL(temp);
 					
-					fills._url[prop] = value;
-					
-					if(fills._url.href != ohref)def.loc.href = this.url(fills._url.href, { url: this.unurl(def.loc, { origin: def.loc }), origin: def.loc });
+					if(temp.href != ohref)def.loc.href = this.url(temp.href, { url: this.unurl(def.loc, { origin: def.loc }), origin: def.loc });
 					
 					return true;
 				},
@@ -1447,22 +1431,27 @@ module.exports = class {
 		}
 		
 		global.rw_this = that => $rw.proxied.has(that) ? $rw.proxied.get(that) : that;
-		// get scope => eval inside of scope
-		global.rw_eval = script => script ? '(()=>' + this.js('eval(' + JSON.stringify(script) + ')', def.rw_data({ global: true, append_fills: 'return ', rewrite_eval: false })) + ')()' : script;
 		
-		global.prop_eval = data => new Function('return(_=>' + this.js(atob(decodeURIComponent(data)), def.rw_data({ global: true })) + ')()')();
+		fills.rw_eval = script => script ? '(()=>' + this.js('eval(' + JSON.stringify(script) + ')', $rw.meta, { global: true, append_fills: 'return ', rewrite_eval: false }) + ')()' : script;
+		
+		// called as argument in import()
+		global.rw_url = (url, rw_fills) => {
+			return this.url(url, { js: true, origin: def.loc, base: $rw.url });
+		};
+		
+		global.prop_eval = script => eval('return(()=>' + this.js('(()=>{' + atob(decodeURIComponent(script)) + '\n})()', $rw.meta, { global: true, append_fills: 'return' }) + ')()');
 		
 		[
 			[ 'Function', value => new Proxy(value, {
 				construct: (target, args) => {
 					var ref = Reflect.construct(target, args), script = args.splice(-1)[0];
 					
-					return Object.assign(Object.defineProperties(Reflect.construct(target, [ ...args, script ? 'return(()=>' + this.js('(()=>{' + script + '\n})()', def.rw_data({ global: true, append_fills: 'return' })) + ')()' : script ]), Object.getOwnPropertyDescriptors(ref)), { toString: def.bind(ref.toString, ref) });
+					return Object.assign(Object.defineProperties(Reflect.construct(target, [ ...args, script ? 'return(()=>' + this.js('(()=>{' + script + '\n})()', $rw.meta, { global: true, append_fills: 'return' }) + ')()' : script ]), Object.getOwnPropertyDescriptors(ref)), { toString: def.bind(ref.toString, ref) });
 				},
 				apply: (target, that, args) => {
 					var ref = Reflect.apply(target, that, args), script = args.splice(-1)[0];
 					
-					return Object.assign(Object.defineProperties(Reflect.apply(target, that, [ ...args, script ? 'return(()=>' + this.js('(()=>{' + script + '\n})()', def.rw_data({ global: true, append_fills: 'return' })) + ')()' : script ]), Object.getOwnPropertyDescriptors(ref)), { toString: def.bind(ref.toString, ref) });
+					return Object.assign(Object.defineProperties(Reflect.apply(target, that, [ ...args, script ? 'return(()=>' + this.js('(()=>{' + script + '\n})()', $rw.meta, { global: true, append_fills: 'return' }) + ')()' : script ]), Object.getOwnPropertyDescriptors(ref)), { toString: def.bind(ref.toString, ref) });
 				},
 			}) ],
 			[ 'Function', 'prototype', 'bind', value => new Proxy(value, {
@@ -1474,7 +1463,7 @@ module.exports = class {
 			[ 'Function', 'prototype', 'call', value => new Proxy(value, {
 				apply: (target, that, [ tht, ...args ]) => Reflect.apply(target, def.is_native(that) ? def.restore(that)[0] : that, [ def.is_native(that) ? def.restore(tht)[0] : tht, ...(args && def.is_native(that) && def.has_prop(args, Symbol.iterator) ? def.restore(...Reflect.apply(arr_iterate, args, [])) : args) ]),
 			}) ],
-			[ 'fetch', value => new Proxy(value, { apply: (target, that, [ url, opts ]) => Reflect.apply(target, global, [ this.url(url, { base: fills.url, origin: def.loc, route: false }), opts ]) }) ],
+			[ 'fetch', value => new Proxy(value, { apply: (target, that, [ url, opts ]) => Reflect.apply(target, global, [ this.url(url, $rw.meta, { route: false }), opts ]) }) ],
 			[ 'Blob', value => new Proxy(value, {
 				construct: (target, [ data, opts ]) => {
 					var decoded = opts && this.mime.js.includes(opts.type) && Array.isArray(data) ? [ this.js(this.decode_blob(data), { url: fills.url, origin: def.loc }) ] : data,
@@ -1486,22 +1475,22 @@ module.exports = class {
 				},
 			}) ],
 			[ 'Document', 'prototype', 'write', value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, that, [ this.html(args.join(''), def.rw_data({ snippet: true })) ]),
+				apply: (target, that, args) => Reflect.apply(target, that, [ this.html(args.join(''), $rw.meta, { snippet: true }) ]),
 			}) ],
 			[ 'Document', 'prototype', 'writeln', value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, that, [ this.html(args.join(''), def.rw_data({ snippet: true })) ]),
+				apply: (target, that, args) => Reflect.apply(target, that, [ this.html(args.join(''), $rw.meta, { snippet: true }) ]),
 			}) ],
 			[ 'Document', 'prototype', 'open', value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, that, args.length === 3 ? [ this.url(args[0], def.rw_data()), ...args.slice(1) ] : args),
+				apply: (target, that, args) => Reflect.apply(target, that, args.length === 3 ? [ this.url(args[0], $rw.meta), ...args.slice(1) ] : args),
 			}) ],
 			[ false, 'Document', 'prototype', (value, desc, otitle) => (otitle = def.doc.title, def.doc.title = this.config.title, Object.defineProperties(value, {
 				URL: { get: _ => fills.url.href },
 				documentURI: { get: _ => fills.url.href },
 				domain: { get: _ => fills.url.hostname },
-				referrer: { get: _ => this.unurl(Reflect.apply(desc.referrer.get, def.doc, []), def.rw_data()) },
+				referrer: { get: _ => this.unurl(Reflect.apply(desc.referrer.get, def.doc, []), $rw.meta) },
 				cookie: {
-					get: _ => this.cookie_decode(Reflect.apply(desc.cookie.get, def.doc, []), def.rw_data()),
-					set: v => Reflect.apply(desc.cookie.set, global.document, [ this.cookie_encode(v, def.rw_data()) ]),
+					get: _ => this.cookie_decode(Reflect.apply(desc.cookie.get, def.doc, []), $rw.meta),
+					set: v => Reflect.apply(desc.cookie.set, global.document, [ this.cookie_encode(v, $rw.meta) ]),
 				},
 				title: {
 					get: _ => otitle,
@@ -1511,7 +1500,7 @@ module.exports = class {
 			})) ],
 			[ 'WebSocket', value => new Proxy(value, {
 				construct: (target, [ url, proto ]) => {
-					var ws = Reflect.construct(target, [ this.url(url, def.rw_data({ ws: true })), proto ]);
+					var ws = Reflect.construct(target, [ this.url(url, $rw.meta, { ws: true }), proto ]);
 					
 					ws.addEventListener('message', event => event.data == 'srv-alive' && event.stopImmediatePropagation() + ws.send('srv-alive') || event.data == 'srv-open' && event.stopImmediatePropagation() + ws.dispatchEvent(new Event('open', { srcElement: ws, target: ws })));
 					
@@ -1544,10 +1533,10 @@ module.exports = class {
 			}) ],
 			[ 'Reflect', 'defineProperty', value => new Proxy(value, { apply: (target, that, [ obj, prop, desc ]) => Reflect.apply(target, that, [ obj, prop, def.desc(obj, prop, desc) ]) }) ],
 			[ 'History', 'prototype', 'pushState', value => new Proxy(value, {
-				apply: (target, that, [ state, title, url ]) => Reflect.apply(target, that, [ state, title, this.url(url, { origin: def.loc, base: fills.url }) ]),
+				apply: (target, that, [ state, title, url ]) => Reflect.apply(target, that, [ state, title, this.url(url, $rw.meta) ]),
 			}) ],
 			[ 'History', 'prototype', 'replaceState', value => new Proxy(value, {
-				apply: (target, that, [ state, title, url ]) => Reflect.apply(target, that, [ state, title, this.url(url, { origin: def.loc, base: fills.url }) ]),
+				apply: (target, that, [ state, title, url ]) => Reflect.apply(target, that, [ state, title, this.url(url, $rw.meta) ]),
 			}) ],
 			[ 'IDBFactory', 'prototype', 'open', value => new Proxy(value, { apply: (target, that, [ name, version ]) => Reflect.apply(target, that, [ def.prefix.name(name), version ]) }) ],
 			[ 'localStorage', value => (delete global.localStorage, new Proxy(value, {
@@ -1574,22 +1563,22 @@ module.exports = class {
 				apply: (target, that, [ key ]) => def.prefix.unname(Reflect.apply(target, that, [ key ])),
 			}) ],
 			[ 'importScripts', value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, that, args.map(url => this.url(url, def.rw_data({ type: 'js', global: true })))),
+				apply: (target, that, args) => Reflect.apply(target, that, args.map(url => this.url(url, $rw.meta, { type: 'js' }))),
 			}) ],
 			[ 'XMLHttpRequest', 'prototype', 'open', value => new Proxy(value, {
-				apply: (target, that, [ method, url, ...args ]) => Reflect.apply(target, that, [ method, this.url(url, def.rw_data({ route: false })), ...args ]),
+				apply: (target, that, [ method, url, ...args ]) => Reflect.apply(target, that, [ method, this.url(url, $rw.meta, { route: false }), ...args ]),
 			}) ],
 			[ 'Navigator', 'prototype', 'sendBeacon', value => new Proxy(value, {
-				apply: (target, that, [ url, data ]) => Reflect.apply(target, that, [ this.url(url, def.rw_data()), data ]),
+				apply: (target, that, [ url, data ]) => Reflect.apply(target, that, [ this.url(url, $rw.meta), data ]),
 			}) ],
 			[ 'window', 'open', value => new Proxy(value, {
-				apply: (target, that, [ url, name, features ]) => Reflect.apply(target, that, [ this.url(url, def.rw_data()), name, features ]),
+				apply: (target, that, [ url, name, features ]) => Reflect.apply(target, that, [ this.url(url, $rw.meta), name, features ]),
 			}) ],
 			[ 'Worker', value => new Proxy(value, {
-				construct: (target, [ url, options ]) => Reflect.construct(target, [ this.url(url, def.rw_data({  type: 'js' })), options ]),
+				construct: (target, [ url, options ]) => Reflect.construct(target, [ this.url(url, $rw.meta, {  type: 'js' }), options ]),
 			}) ],
 			[ 'FontFace', value => new Proxy(value, {
-				construct: (target, [ family, source, descriptors ]) => Reflect.construct(target, [ family, this.url(source, def.rw_data({  type: 'font' })), descriptors ]),
+				construct: (target, [ family, source, descriptors ]) => Reflect.construct(target, [ family, this.url(source, $rw.meta, {  type: 'font' }), descriptors ]),
 			}) ],
 			[ 'ServiceWorkerContainer', 'prototype', 'register', value => new Proxy(value, {
 				apply: (target, that, [ url, options ]) => new Promise((resolve, reject) => reject(new Error('A Service Worker has been blocked for this domain'))),
@@ -1604,27 +1593,28 @@ module.exports = class {
 				apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)),
 			}) ],
 			[ 'Document', 'prototype', 'querySelector', value => new Proxy(value, {
-				apply: (target, that, [ query ]) => Reflect.apply(target, that, [ this.css(query, def.rw_data()) ]),
+				apply: (target, that, [ query ]) => Reflect.apply(target, that, [ this.css(query, $rw.meta) ]),
 			}) ],
 			[ 'Document', 'prototype', 'querySelectorAll', value => new Proxy(value, {
-				apply: (target, that, [ query ]) => Reflect.apply(target, that, [ this.css(query, def.rw_data()) ]),
+				apply: (target, that, [ query ]) => Reflect.apply(target, that, [ this.css(query, $rw.meta) ]),
 			}) ],
 			[ 'getComputedStyle', value => new Proxy(value, {
 				apply: (target, that, args) => Reflect.apply(target, def.restore(that)[0], def.restore(...args).map(x => x instanceof Element ? x : def.doc.body)),
 			}) ],
 			[ 'CSSStyleDeclaration', 'prototype', 'getPropertyValue', value => new Proxy(value, {
-				apply: (target, that, [ prop, value ]) => this.css(Reflect.apply(target, that, [ prop ]), def.rw_data()),
+				apply: (target, that, [ prop, value ]) => this.css(Reflect.apply(target, that, [ prop ]), $rw.meta),
 			}) ],
 			[ 'CSSStyleDeclaration', 'prototype', 'setProperty', value => new Proxy(value, {
-				apply: (target, that, [ prop, value ]) => Reflect.apply(target, that, [ prop, this.css(value, def.rw_data({ prop: prop })) ]),
+				apply: (target, that, [ prop, value ]) => Reflect.apply(target, that, [ prop, this.css(value, $rw.meta, { prop: prop }) ]),
 			}) ],
 			// route rewritten props to the hooked function
 			[ 'CSSStyleDeclaration', value => (this.attr.css_keys.forEach(prop => Object.defineProperty(value.prototype, prop, {
 				get(){
-					return thjs.uncss(this.getPropertyValue(prop), def.rw_data({ keep_input: true }));
+					// thjs.uncss()
+					return this.getPropertyValue(prop);
 				},
 				set(value){
-					return this.setProperty(prop, thjs.css(value, def.rw_data({ keep_input: true })));
+					return this.setProperty(prop, thjs.css(value, $rw.meta, { keep_input: true }));
 				},
 			})), value) ],
 			[ 'Document', 'prototype', 'createTreeWalker', value => new Proxy(value, {

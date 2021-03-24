@@ -1,7 +1,7 @@
 'use strict';
 var rewriter = require('./index.js'),
 	rw = new rewriter(rewrite_conf),
-	$rw = rw.get_globals(global),
+	$rw = rw.get_globals(),
 	pm = {
 		get_href(){
 			var x = global.location.href;
@@ -16,7 +16,7 @@ var rewriter = require('./index.js'),
 		},
 		rw_data: data => Object.assign({ url: pm.url, base: pm.url, origin: pm.get_href() }, data ? data : {}),
 		init: global.$rw_init,
-		url: $rw.url || ($rw.url = new URL($rw.url || rw.unurl(global.location.href, { origin: global.location }))),
+		url: $rw.url || ($rw.url = new URL($rw.url || rw.unurl(global.location.href, $rw.meta))),
 		unnormal: arg => Array.isArray(arg) ? arg.map(pm.unnormal) : $rw.proxied.get(arg) || arg,
 		frame(frame){
 			if(!frame)return frame;
@@ -66,10 +66,10 @@ var rewriter = require('./index.js'),
 	getAttribute(attr){
 		var val = Reflect.apply(org.getAttribute.value, this, [ attr ]);
 		
-		return rw.attr.url[1].includes(attr) ? rw.unurl(val, { origin: global.location }) : val;
+		return rw.attr.url[1].includes(attr) ? rw.unurl(val, $rw.meta) : val;
 	},
 	setAttributeNS(namespace, attr, val){
-		return rw.attr.del[1].includes(attr) ? true : Reflect.apply(org.setAttributeNS.value, this, [ namespace, attr, rw.attr.url[1].includes(attr) ? rw.url(val, { origin: location, base: pm.url }) : val ]);
+		return rw.attr.del[1].includes(attr) ? true : Reflect.apply(org.setAttributeNS.value, this, [ namespace, attr, rw.attr.url[1].includes(attr) ? rw.url(val, $rw.meta) : val ]);
 	},
 	// gets called natively?!?!?!
 	insertAdjacentHTML(where, html, is_pm){
@@ -103,13 +103,13 @@ var rewriter = require('./index.js'),
 		return Reflect.apply(org.innerHTML.get, this, []);
 	},
 	set innerHTML(v){
-		return Reflect.apply(org.innerHTML.set, this, [ rw.html(v, pm.rw_data({ snippet: true })) ]);
+		return Reflect.apply(org.innerHTML.set, this, [ rw.html(v, $rw.meta, { snippet: true }) ]);
 	},
 	get outerHTML(){
 		return Reflect.apply(org.outerHTML.get, this, []);
 	},
 	set outerHTML(v){
-		return Reflect.apply(org.outerHTML.set, this, [ rw.html(v, pm.rw_data({ snippet: true })) ]);
+		return Reflect.apply(org.outerHTML.set, this, [ rw.html(v, $rw.meta, { snippet: true }) ]);
 	},
 }) ], [ global.Node, org => ({
 	appendChild(node){
@@ -166,7 +166,7 @@ url_protos.forEach(con => {
 	rw.attr.url[1].forEach(attr => org && org[attr] && Reflect.defineProperty(con.prototype, attr, {
 		get(){
 			var inp = Reflect.apply(org[attr].get, this, []),
-				out = rw.unurl(inp, { origin: global.location });
+				out = rw.unurl(inp, $rw.meta);
 			
 			return out || inp;
 		},
