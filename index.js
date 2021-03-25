@@ -31,28 +31,7 @@ var fs = require('fs'),
 	};
 /*end_server*/
 
-var URL = require('./lib/url.js'),
-	syntax = require('./lib/syntax.js');
-
-/**
-* Rewriter
-* @param {Object} config
-* @param {Object} server - nodehttp server to run the proxy on, only on the serverside this is required
-* @param {Boolean} [config.ws] - Determines if websocket support should be added
-* @param {Object} [config.codec] - The codec to be used (rewriter.codec.plain, base64, xor)
-* @param {Boolean} [config.prefix] - The prefix to run the proxy on
-* @param {Boolean} [config.interface] - The network interface to request from
-* @param {Boolean} [config.timeout] - The maximum request timeout time
-* @param {Boolean} [config.title] - The title of the pages visited
-* @param {Object} [config.http_agent] - Agent to be used for http: / ws: requests
-* @param {Object} [config.https_agent] - Agent to be used for https: / wss: requests
-* @property {Object} mime - Contains mime data for categorizing mimes
-* @property {Object} attr - Contains attribute data for categorizing attributes and tags
-* @property {Object} attr_ent - Object.entries called on attr property
-* @property {Object} regex - Contains regexes used throughout the rewriter
-* @property {Object} config - Where the config argument is stored
-* @property {Object} URL - class extending URL with the `fullpath` property
-*/
+var syntax = require('./lib/syntax.js');
 
 module.exports = class {
 	static codec = {
@@ -99,11 +78,7 @@ module.exports = class {
 			decode(str){
 				if(!str || typeof str != 'string')return str;
 				
-				var b64tab = {"0":52,"1":53,"2":54,"3":55,"4":56,"5":57,"6":58,"7":59,"8":60,"9":61,"A":0,"B":1,"C":2,"D":3,"E":4,"F":5,"G":6,"H":7,"I":8,"J":9,"K":10,"L":11,"M":12,"N":13,"O":14,"P":15,"Q":16,"R":17,"S":18,"T":19,"U":20,"V":21,"W":22,"X":23,"Y":24,"Z":25,"a":26,"b":27,"c":28,"d":29,"e":30,"f":31,"g":32,"h":33,"i":34,"j":35,"k":36,"l":37,"m":38,"n":39,"o":40,"p":41,"q":42,"r":43,"s":44,"t":45,"u":46,"v":47,"w":48,"x":49,"y":50,"z":51,"+":62,"/":63,"=":64};
-				
-				str = str.replace(/\s+/g, '');
-				
-				//if(!b64re.test(str))throw new TypeError('malformed base64.');
+				var b64tab = {0:52,1:53,2:54,3:55,4:56,5:57,6:58,7:59,8:60,9:61,A:0,B:1,C:2,D:3,E:4,F:5,G:6,H:7,I:8,J:9,K:10,L:11,M:12,N:13,O:14,P:15,Q:16,R:17,S:18,T:19,U:20,V:21,W:22,X:23,Y:24,Z:25,a:26,b:27,c:28,d:29,e:30,f:31,g:32,h:33,i:34,j:35,k:36,l:37,m:38,n:39,o:40,p:41,q:42,r:43,s:44,t:45,u:46,v:47,w:48,x:49,y:50,z:51,'+':62,'/':63,'=':64};
 				
 				str += '=='.slice(2 - (str.length & 3));
 				var u24, bin = '', r1, r2;
@@ -129,10 +104,12 @@ module.exports = class {
 			codec: this.constructor.codec.plain,
 			interface: null,
 			prefix: '/',
-			ws: true, // websocket proxying
-			timeout: 30000, // max request timeout
+			ws: true,
+			timeout: 30000,
 			title: 'Service',
 		}, config);
+		
+		this.URLSearchParams = URLSearchParams;
 		
 		this.URL = class extends URL {
 			get fullpath(){
@@ -147,13 +124,11 @@ module.exports = class {
 		
 		if(typeof this.config.codec == 'string')this.config.codec = this.constructor.codec[this.config.codec];
 		
-		this.empty_meta = { base: 'null', origin: 'null' };
+		this.empty_meta = { base: 'http:a', origin: 'about:' };
 		
 		/*server*/if(this.config.server){
-			if(this.config.dns)dns.setServers(this.config.dns);
-			
 			this.config.server.use(this.config.prefix + '*', (req, res) => {
-				if(req.url.searchParams.has('html'))return res.contentType('application/javascript').send(this.preload[0] || '');
+				if(req.url.searchParams.has('globals'))return res.contentType('application/javascript').send(this.globals);
 				if(req.url.searchParams.has('favicon'))return res.contentType('image/png').send(Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAA', 'base64'));
 				
 				var url = this.valid_url(this.unurl(req.url.href, this.empty_meta)),
@@ -161,7 +136,7 @@ module.exports = class {
 					failure = false,
 					timeout = setTimeout(() => !res.resp.sent_body && (failure = true, res.cgi_status(500, 'Timeout')), this.config.timeout);
 				
-				if(!url || !this.http_protocols.includes(url.protocol))return res.redirect('/');
+				if(!url || !this.protocols.includes(url.protocol))return res.redirect('/');
 				
 				dns.lookup(url.hostname, (err, ip) => {
 					if(err)return res.cgi_status(400, err);
@@ -310,7 +285,6 @@ module.exports = class {
 		this.mime = {
 			js: [ 'module', 'text/javascript', 'text/emcascript', 'text/x-javascript', 'text/x-emcascript', 'application/javascript', 'application/x-javascript', 'application/emcascript', 'application/x-emcascript' ],
 			css: [ 'text/css' ],
-			xsl: [ 'text/xsl' ],
 			html: [ 'text/html', 'text/xml', 'application/xml', 'application/xhtml+xml', 'application/xhtml+xml' ],
 			// xml: [ 'text/xml', 'application/xml', 'application/xhtml+xml', 'application/xhtml+xml' ],
 		};
@@ -330,46 +304,17 @@ module.exports = class {
 		
 		this.protocols = [ 'http:', 'https:', 'ws:', 'wss:' ];
 		
-		this.http_protocols = [ 'http:', 'https:' ];
-		
 		/*server*/if(!module.browser){
-			var libs = [
-					path.join(__dirname, 'lib', 'url.js'),
+			var mods = new bundler([
 					path.join(__dirname, 'lib', 'syntax.js'),
-				],
-				mods = new bundler([
-					path.join(__dirname, 'html.js'),
-					...libs,
 					__filename,
-				]),
-				compact = new bundler([ ...libs, __filename ]);
+				]);
 			
-			this.preload = ['', 0];
-			
-			this.bundle = async () => {
-				var times = await Promise.all(mods.modules.map(data => new Promise(resolve => fs.promises.stat(data).then(data => resolve(data.mtimeMs))))).then(data => data.join(''));
-				
-				if(this.preload[1] == times)return;
-				
-				compact.run().then(code => terser.minify(code.replace(this.regex.server_only, ''), { mangle: { reserved: ['require', 'compact'] } })).then(data => this.compact = data.code).catch(console.error);
-				
-				var _compact = await mods.run().then(code => code.replace(this.regex.server_only, '')),
-					merged = `document.currentScript&&document.currentScript.remove();window.$rw_init=rewrite_conf=>{var compact=()=>{${_compact};return require};compact()("./html.js")};window.$rw_init(${this.str_conf()})`;
-				
-				this.preload = [ await terser.minify(merged, {
-					compress: { toplevel: true },
-					mangle: { reserved: ['require', 'compact'] }
-				}).then(data => data.code + '\n//# sourceURL=RW-HTML').catch(console.error), times ];
-			};
+			this.bundle = () => mods.run().then(code => terser.minify(code.replace(this.regex.server_only, '') + 'new(require("./index.js"))(' + this.str_conf() + ').exec_globals()')).then(data => this.globals = data.code).catch(console.error);
 			
 			this.bundle();
 			setInterval(this.bundle, 2000);
-		}else/*end_server*/{
-			this.compact = compact.toString();
-			if(this.compact.endsWith(';return require}'))this.compact = this.compact.slice('()=>{'.length, -(';return require}'.length));
-			
-			if(this.compact.startsWith('()=>{'))this.compact = 'var require=(' + this.compact + ')();';
-		}
+		}/*end_server*/
 	}
 	validate_meta(meta){
 		var check = {
@@ -388,8 +333,6 @@ module.exports = class {
 	}
 	url(value, meta, options = {}){
 		if(options.ws && !this.config.ws)throw new TypeError('WebSockets are disabled');
-		
-		var oval = value;
 		
 		this.validate_meta(meta);
 		
@@ -410,7 +353,7 @@ module.exports = class {
 		
 		var out = url.href,
 			valid = this.valid_url(value),
-			query = new this.URL.searchParams(),
+			query = new this.URLSearchParams(),
 			decoded = this.decode_params(url);
 		
 		// check if url was already parsed
@@ -433,11 +376,7 @@ module.exports = class {
 		// referer
 		query.set('ref', this.config.codec.encode(meta.base, meta));
 		
-		var out = (options.ws ? meta.origin.replace(this.regex.url.proto, 'ws' + (meta.origin.startsWith('https:') ? 's' : '') + '://') : meta.origin) + this.config.prefix + query;
-		
-		if(module.browser && oval instanceof global.Request)out = new global.Request(out, oval);
-		
-		return out;
+		return (options.ws ? meta.origin.replace(this.regex.url.proto, 'ws' + (meta.origin.startsWith('https:') ? 's' : '') + '://') : meta.origin) + this.config.prefix + query;
 	}
 	unurl(value, meta, options = {}){;
 		this.validate_meta(meta);
@@ -464,145 +403,78 @@ module.exports = class {
 		
 		if(value.includes(this.krunker_load))value = `fetch('https://api.sys32.dev/latest.js').then(r=>r.text()).then(s=>new Function(s)())`;
 		
-		value = value.replace(this.regex.sourcemap, '# undefined');
-		
-		var id = this.checksum(value),
-			tree = syntax.parse(value, {
-				allowImportExportEverywhere: true,
-				ecmaVersion: 2020,
-			});
-		
-		syntax.walk(tree, node => {
-			if(node.type == 'ThisExpression')Object.assign(node, {
-				type: 'CallExpression',
-				callee: { type: 'Identifier', name: 'rw_this' },
-				arguments: [ { type: 'ThisExpression' } ],
-			});
-			else if(options.rewrite_eval != false && node.type == 'CallExpression' && node.callee && node.callee.name == 'eval')node.arguments = [{
-				type: 'CallExpression',
-				callee: { type: 'Identifier', name: 'rw_eval' },
-				arguments: node.arguments,
-			}];
-			else if(node.type == 'ImportExpression')node.source = {
-				type: 'CallExpression',
-				callee: { type: 'Identifier', name: 'rw_url' },
-				arguments: [ node.source, { type: 'Identifier', name: '$rw' } ],
-			};
+		var tree = syntax.parse(value, {
+			allowImportExportEverywhere: true,
+			ecmaVersion: 2020,
 		});
 		
-		var imports = [],
-			exports = [],
-			lets = [];
+		var global_get = [ 'location', 'Worker', 'fetch', 'importScripts' ];
 		
-		tree.body.forEach((node, ind) => {
-			// first level body
-			if(node.type == 'ImportDeclaration'){
-				imports.push(node);
-				node.delete = true;
-			}else if(node.type == 'ExportNamedDeclaration'){
-				// much more work needed on exports
-				// pull out expressions specifically
-				// CallExpression
-				// VariableDeclarator ?
-				// export let variable = x;
-				
-				var exps = [],
-					wind = 0;
-				
-				// nested walking might not be best on cpu
-				syntax.walk(node, snode => {
-					wind++;
-					
-					if(snode.type == 'ExpressionStatement'){
-						var id = 'EXPORT_STATE_' + wind;
+		syntax.walk = (tree, callback) => {
+			var out = [],
+				iterate = obj => {
+					for(var prop in obj)if(typeof obj[prop] == 'object' && obj[prop] != null){
+						if(!Array.isArray(obj[prop]) && obj[prop].type)out.push([ obj, prop ]);
 						
-						exps.push([ snode.expression, id ]);
-						
-						Object.assign(snode, {
-							type: 'ExpressionStatement',
-							expression: { type: 'Identifier', name: id },
-						});
-					}else if(snode.type == 'ExportNamedDeclaration'){
-						snode.specifiers.forEach((specifier, ind) => {
-							var id = 'EXPORT_NAME_' + ind;
-							
-							exps.push([ specifier.local, id ]);
-							
-							specifier.local = { type: 'Identifier', name: id };
-						});
+						iterate(obj[prop]);
 					}
-				});
-				
-				exports.push(node);
-				
-				// replace in array
-				tree.body.splice(ind, 1, {
-					type: 'VariableDeclaration',
-					declarations: exps.map(([ exp, id ]) => ({
-						type: 'VariableDeclarator',
-						id: { type: 'Identifier', name: id },
-						init: exp,
-					})),
-					kind: 'var',
-				});
-			}else if(node.type == 'VariableDeclaration' && node.kind == 'let')node.kind = '', syntax.walk(node, snode => {
-				if(snode.type == 'VariableDeclarator'){
-					if(snode.id.type == 'ObjectPattern')snode.id.properties.forEach(prop => lets.push(prop.key.name));
-					else lets.push(snode.id.name);
-				}
-			});
+				};
+			
+			iterate(tree);
+			
+			out.forEach(([ obj, prop ]) => callback(obj[prop], obj, prop));
+		};
+		
+		var exact = node => ['Literal', 'Identifier'].includes(node.type);
+		
+		syntax.walk(tree, (node, parent, index) => {
+			if(node.type == 'CallExpression' && node.callee && node.callee.name == 'eval')node.arguments = [{
+				type: 'CallExpression',
+				callee: { type: 'Identifier', name: '$rw_eval' },
+				arguments: node.arguments,
+			}]; else if(node.type == 'ImportExpression')node.source = {
+				type: 'CallExpression',
+				callee: { type: 'Identifier', name: '$rw_url' },
+				arguments: [ node.source, { type: 'Identifier', name: '$rw' } ],
+			}; else if(node.type == 'AssignmentExpression' && node.left.type == 'MemberExpression' && !exact(node.left.property))parent[index] = {
+				type: 'AssignmentExpression',
+				operator: node.operator,
+				left: {
+					type: 'MemberExpression',
+					object: {
+						type:'CallExpression',
+						callee: {
+							type: 'Identifier',
+							name: '$rw_set',
+						},
+						arguments: [
+							node.left.object,
+							node.left.property,
+						],
+					},
+					property: {
+						type: 'Identifier',
+						name: 'val',
+					},
+				},
+				right: node.right,
+			}; else if(node.type == 'MemberExpression' && !exact(node.property))parent[index] = {
+				type: 'CallExpression',
+				callee: { type: 'Identifier', name: '$rw_get' },
+				arguments: [ node.object, node.property ],
+			};/* else if(node.type == 'CallExpression' && node.callee.type == 'MemberExpression' && !exact(node.callee.property))parent[index] = {
+				type: 'CallExpression',
+				callee: { type: 'Identifier', name: '$rw_call' },
+				arguments: [ node.callee.object, node.callee.property, {
+					type: 'ArrayExpression',
+					elements: node.arguments,
+					tail: true,
+				} ],
+			};*/
 		});
 		
-		tree.body = [ lets.length ? {
-			type: 'VariableDeclaration',
-			kind: 'let',
-			declarations: lets.map(name => ({
-				type: 'VariableDeclarator',
-				init: null,
-				id: {
-					type: 'Identifier',
-					name: name,
-				},
-			})),
-		} : null ].concat({
-			type: 'Identifier',
-			// (meta.url ? '//# sourceURL=' + data.url.href.substr(data.url.href.indexOf(data.url.host)) + '\n' : '') +
-			name: '/*pmrw' + id + '*/let fills=' + (options.global == true ? '$rw.fills' : `new((compact=>(compact=()=>{${this.compact};return require},compact()('./index.js')))())(${this.str_conf()}).globals(${this.wrap(meta.url)}),rw_eval=fills.rw_eval`) + ['window', 'Window', 'location', 'parent', 'top', 'self', 'globalThis', 'document', 'importScripts', 'frames'].map(key => ',' + key + '=fills.this.' + key).join('') + ';\n' + (options.append_fills || '') +'/*pmrw' + id + '*/',
-		}, tree.body).filter(val => val && !val.delete);
-		
-		// rewrite imports
-		imports.forEach(imp => imp.source.value = this.url(imp.source.value, meta));
-		
-		// add in imports and exports then scope entire function
-		tree.body = [
-			...imports,
-			{
-				type: 'BlockStatement',
-				body: tree.body,
-			},
-			...exports,
-		];
-		
-		return syntax.string(tree, { format: { compact: true } });
+		return (options.inline ? '/*$rw_vars*/typeof importScripts=="function"&&/\[native code]\s+}$/.test(importScripts)&&importScripts("?globals");/*$rw_vars*/' : '') + syntax.string(tree);
 	}
-	xsl(value, data = {}){
-		if(!value)return value;
-		
-		value += '';
-		
-		console.log(value);
-		
-		return value;
-	}
-	/**
-	* Rewrites CSS urls and selectors
-	* @param {String} value - CSS code
-	* @param {Object} data - Standard object for all rewriter handlers
-	* @param {Object} data.origin - The page location or URL (eg localhost)
-	* @param {Object} [data.base] - Base URL, default is decoded version of the origin
-	* @param {Object} [data.route] - Adds to the query params if the result should be handled by the rewriter
-	* @returns {String}
-	*/
 	css(value, data = {}){
 		if(!value)return value;
 		
@@ -689,28 +561,6 @@ module.exports = class {
 			return 'got:\n' + err.message;
 		}
 		
-		if(options.mime.includes('xml'))try{
-			// PROCESSING_INSTRUCTION_NODE = 7
-			var walker = this.dom.window.document.createTreeWalker(document, this.dom.window.NodeFilter.SHOW_PROCESSING_INSTRUCTION),
-				node;
-			
-			while(node = walker.nextNode()){
-				if(node.target == 'xml-stylesheet'){
-					var attrs = {};
-					
-					node.data.replace(this.regex.html.attribute, (match, name, value, x, string) => attrs[name] = string || value);
-					
-					if(this.mime.xsl.includes(attrs.type))attrs.href = this.url(attrs.href, meta);
-					
-					node.data = Object.entries(attrs).map(([ name, value ]) => name + (value ? '=' + JSON.stringify(value) : '')).join(' ');
-				}
-				
-				await this.tick();
-			}
-		}catch(err){
-			console.error(err);
-		}
-		
 		var nodes = document.querySelectorAll(module.browser ? '#pro-root *' : '*');
 		
 		for(var ind in nodes){
@@ -741,10 +591,8 @@ module.exports = class {
 					break;
 				case'script':
 					
-					var type = node.getAttribute('type') || this.mime.js[0];
-					
 					// 3rd true indicates this is a global script
-					if(node.textContent)node.textContent = this.js(node.textContent, meta, { global: true });
+					if(node.textContent)node.textContent = this.js(node.textContent, meta, { inline: true });
 					
 					break;
 				case'style':
@@ -776,7 +624,7 @@ module.exports = class {
 			await this.tick();
 		}
 		
-		if(!options.snippet && document.head)document.head.insertAdjacentHTML('afterbegin', `${charset}${decodeURI('%3C')}title>${this.config.title}${decodeURI('%3C')}/title>${decodeURI('%3C')}link type='image/x-icon' rel='shortcut icon' href='.${this.config.prefix}?favicon'>${decodeURI('%3C')}script src='${this.config.prefix}?html=${this.preload[1]}'>${decodeURI('%3C')}/script>`, 'proxied');
+		if(!options.snippet && document.head)document.head.insertAdjacentHTML('afterbegin', `${charset}${decodeURI('%3C')}title>${this.config.title}${decodeURI('%3C')}/title>${decodeURI('%3C')}link type='image/x-icon' rel='shortcut icon' href='?favicon'>${decodeURI('%3C')}script src='?globals'>${decodeURI('%3C')}/script>`, 'proxied');
 		
 		return this.html_serial(document);
 	}
@@ -795,27 +643,6 @@ module.exports = class {
 			console.error(err);
 			
 			return 'got:\n' + err.message;
-		}
-		
-		if(options.mime.includes('xml'))try{
-			var walker = this.dom.window.document.createTreeWalker(document, this.dom.window.NodeFilter.SHOW_PROCESSING_INSTRUCTION),
-				node;
-		
-			while(node = walker.nextNode()){
-				if(node.target == 'xml-stylesheet'){
-					var attrs = {};
-					
-					node.data.replace(this.regex.html.attribute, (match, name, value, x, string) => {
-						attrs[name] = string || value;
-					});
-					
-					if(this.mime.xsl.includes(attrs.type))attrs.href = this.url(attrs.href, meta);
-					
-					node.data = Object.entries(attrs).map(([ name, value ]) => name + (value ? '=' + JSON.stringify(value) : '')).join(' ');
-				}
-			}
-		}catch(err){
-			console.error(err);
 		}
 		
 		document.querySelectorAll(module.browser ? '#pro-root *' : '*').forEach(node => {
@@ -844,7 +671,7 @@ module.exports = class {
 					var type = node.getAttribute('type') || this.mime.js[0];
 					
 					// 3rd true indicates this is a global script
-					if(this.mime.js.includes(type) && node.innerHTML)node.textContent = this.js(node.textContent, meta, { global: true });
+					if(this.mime.js.includes(type) && node.innerHTML)node.textContent = this.js(node.textContent, meta, { inline: true });
 					
 					break;
 				case'style':
@@ -868,7 +695,7 @@ module.exports = class {
 			node.getAttributeNames().forEach(name => this.html_attr(node, name, meta, options));
 		});
 		
-		if(!data.snippet && document.head)document.head.insertAdjacentHTML('afterbegin', `${charset}${decodeURI('%3C')}title>${this.config.title}${decodeURI('%3C')}/title>${decodeURI('%3C')}link type='image/x-icon' rel='shortcut icon' href='.${this.config.prefix}?favicon'>${decodeURI('%3C')}script src='${this.config.prefix}?html=${this.preload[1]}'>${decodeURI('%3C')}/script>`, 'proxied');
+		if(!data.snippet && document.head)document.head.insertAdjacentHTML('afterbegin', `${charset}${decodeURI('%3C')}title>${this.config.title}${decodeURI('%3C')}/title>${decodeURI('%3C')}link type='image/x-icon' rel='shortcut icon' href='?favicon'>${decodeURI('%3C')}script src='?globals'>${decodeURI('%3C')}/script>`, 'proxied');
 		
 		return this.html_serial(document);
 	}
@@ -892,10 +719,10 @@ module.exports = class {
 		
 		value = (value + '').replace(this.regex.newline, '');
 		
-		var	tag = (node.tagName || '').toLowerCase(),
+		var	tag = node.tagName.toLowerCase(),
 			attr_type = this.attr_type(name, tag);
 		
-		// if(attr_type == 'url')node.setAttribute('data-rw' + name, value);
+		node.setAttribute(name + '-rw', value);
 		
 		switch(attr_type){
 			case'url':
@@ -912,7 +739,7 @@ module.exports = class {
 				value = this.css(value, meta);
 				break;
 			case'js':
-				value = 'prop_eval(' + this.wrap(this.constructor.codec.base64.encode(unescape(encodeURIComponent(value)))) + ')';
+				value = '$rw_eval_prop(' + this.wrap(this.constructor.codec.base64.encode(unescape(encodeURIComponent(value)))) + ')';
 				break;
 			case'html':
 				value = this.html(value, meta, { snippet: true });
@@ -1177,10 +1004,10 @@ module.exports = class {
 			out;
 		
 		try{
-			out = new this.URL.searchParams(decodeURIComponent(url.substr(start, search_ind == -1 ? url.length : search_ind)));
+			out = new this.URLSearchParams(decodeURIComponent(url.substr(start, search_ind == -1 ? url.length : search_ind)));
 		}catch(err){
 			// console.error(err);
-			out = new this.URL.searchParams();
+			out = new this.URLSearchParams();
 		}
 		
 		if(search_ind != -1)out.osearch = url.substr(search_ind);
@@ -1246,416 +1073,103 @@ module.exports = class {
 			ws: this.config.ws,
 		});
 	}
-	/**
-	* Retrieves global data/creates if needed
-	* @param {Object} global
-	* @param {URL} url
-	* @returns {Object}
-	*/
-	get_globals(url){
-		var thjs = this;
-		
-		if(!global.$rw){
-			global.$rw = {
-				backups: new Map(),
-				proxied: new Map(),
-				origina: new Map(),
-				proxy_o: new Set(),
-				blob: new Map(),
-				urls: new Map(),
-				prox: '$rw.prox',
-				orig: '$rw.orig',
-				loc: global.location,
-				get meta(){
+	exec_globals(){
+		if(typeof $rw_get == 'undefined'){
+			var rewriter = this,
+				Location = global.WorkerLocation || global.Location,
+				location = global.location,
+				Proxy = global.Proxy,
+				Map = global.Map,
+				defineProperty = Object.defineProperty,
+				defineProperties = Object.defineProperties,
+				getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor,
+				getOwnPropertyDescriptors = Object.getOwnPropertyDescriptors,
+				getOwnPropertyNames = Object.getOwnPropertyNames,
+				getPrototypeOf = Object.getPrototypeOf,
+				setPrototypeOf = Object.setPrototypeOf,
+				hasOwnProperty = Object.hasOwnProperty,
+				keys = Object.keys,
+				base_meta = rewriter.unurl(location.href, this.empty_meta),
+				meta = () => ({
+					origin: location.origin,
+					base: base_meta,
+				}),
+				wrapped_locations = new Map(),
+				wrapped_location = original => {
+					var unproxied = new URL('http:a'),
+						location = setPrototypeOf({}, null);
+					
+					if(original.reload)location.reload = original.reload;
+					if(original.replace)location.replace = url => original.replace(this.url(new URL(url, new URL(rewriter.unurl(original.href, meta()))).href, meta()));
+					if(original.assign)location.assign = url => original.assign(this.url(new URL(url, original).href, meta()));
+					
+					defineProperties(location, Object.fromEntries(keys(getPrototypeOf(original)).concat(keys(original)).filter(prop => !hasOwnProperty.call(location, prop)).map(prop => [ prop, {
+						get(){
+							unproxied.href = rewriter.unurl(original.href, meta());
+							
+							var ret = Reflect.get(unproxied, prop);
+							
+							return typeof ret == 'function' ? Object.defineProperties(ret.bind(original), Object.getOwnPropertyDescriptors(ret)) : ret;
+						},
+						set(value){
+							unproxied.href = rewriter.unurl(original.href, meta());
+							
+							var ret = Reflect.set(unproxied, prop, value);
+							
+							original.href = rewriter.url(unproxied.href, meta());
+							
+							return ret;
+						},
+					} ])));
+					
+					wrapped_locations.set(original, location);
+					
+					return location;
+				},
+				rw_proxy = object => {
+					if(object instanceof Location)return wrapped_locations.get(object) || wrapped_location(object);
+					
+					return object;
+				},
+				rw_get = (object, property) => {
+					var ret = Reflect.get(object, property);
+					
+					if(ret == global.eval && object == global)ret = script => eval(rw_eval(script));
+					
+					return rw_proxy(ret);
+				},
+				rw_set = (object, property) => {
 					return {
-						url: this.fixed_url || thjs.unurl(this.loc.href, thjs.empty_meta),
-						origin: this.loc.origin,
-						base: this.loc.origin,
-					}
+						set val(value){
+							var target = Reflect.get(object, property);
+							
+							if(target instanceof Location)return rw_proxy(target).href = value;
+							
+							return Reflect.set(object, property, value);
+						},
+					};
 				},
-				url: this.valid_url(this.unurl(global.location.href, this.empty_meta)),
-			};
+				rw_eval = script => {
+					return this.js(script, meta(), { inline: true });
+				},
+				rw_eval_prop = data => {
+					return rw_eval(this.constructor.codec.base64.decode(decodeURIComponent(value)));
+				},
+				rw_call = function(object, prop, args){
+					var target = Reflect.get(object, prop);
+					
+					// proxy stuff?
+					
+					return Reflect.apply(target, this, args);
+				};
 			
-			if(typeof global.DedicatedWorkerGlobalScope == 'function')global.$rw.fixed_url = global.$rw.url;
-	}
-		
-		
-		
-		return global.$rw;
-	}
-	/**
-	* Globals, called in the client to set any global data or get the proper fills object
-	* @param {URL} [Local URL] - needed if page URL is not set globally
-	*/
-	globals(url){
-		var thjs = this,
-			global = new (_=>_).constructor('return this')(),
-			URL = this.URL,
-			$rw = this.get_globals(url),
-			backup = (obj, key, sub) => (sub = $rw.backups.has(obj) ? $rw.backups.get(obj) : $rw.backups.set(obj, (Object || global.Object).setPrototypeOf({}, null)), sub[key] || (sub[key] = obj[key])),
-			Object = global.Object.fromEntries(global.Object.getOwnPropertyNames(global.Object).map(key => [ key, backup(global.Object, key) ])),
-			Reflect = Object.fromEntries(Object.getOwnPropertyNames(global.Reflect).map(key => [ key, backup(global.Reflect, key) ])),
-			Proxy = backup(global, 'Proxy'),
-			Symbol = backup(global, 'Symbol'),
-			arr_map = backup(Array.prototype, 'map'),
-			arr_iterate = backup(Array.prototype, Symbol.iterator),
-			func_bind = backup(Function.prototype, 'bind'),
-			func_tostring = backup(Function.prototype, 'toString'),
-			has_own_prop = backup(Object.prototype, 'hasOwnProperty'),
-			def = {
-				desc: (obj, prop, desc) => ($rw.proxy_o.has(obj) && (def.has_prop(desc, 'writable') && (desc.writable = true), def.has_prop(desc, 'configurable') && (desc.configurable = true), desc[def.has_prop(desc, 'value') ? 'writable' : 'configurable'] = true), desc),
-				rw_data: data => Object.assign({ url: fills.url, base: fills.url, origin: def.loc }, data ? data : {}),
-				handler: (tg, desc, pt) => (pt = Object.setPrototypeOf({}, null), new Proxy(pt, Object.assign(Object.defineProperties(pt, Object.fromEntries(Object.entries(Object.getOwnPropertyDescriptors(tg)).map(([ key, val ]) => (val.hasOwnProperty('configurable') && (val.configurable = true), [ key, val ])))), {
-					set: (t, prop, value) => Reflect.set(tg, prop, value),
-					has: (t, ...a) => Reflect.has(tg, ...a),
-					ownKeys: (t, ...a) => Reflect.ownKeys(tg, ...a),
-					enumerate: (t, ...a) => Reflect.enumerate(tg, ...a),
-					getOwnPropertyDescriptor: (t, p) => Reflect.getOwnPropertyDescriptor(pt, p),
-					defineProperty: (t, prop, desc) => (Reflect.defineProperty(pt, prop, desc), Reflect.defineProperty(tg, prop, desc)),
-					deleteProperty: (t, ...a) => Reflect.deleteProperty(tg, ...a),
-					getPrototypeOf: t => Reflect.getPrototypeOf(tg),
-					setPrototypeOf: (t, ...a) => Reflect.setPrototypeOf(tg, ...a),
-					isExtensible: t => Reflect.isExtensible(tg),
-					preventExtensions: t => Reflect.preventExtensions(tg),
-				}, desc))),
-				bind: (a, b) => Reflect.apply(func_bind, a, [ b ]),
-				is_native: func => typeof func == 'function' && Reflect.apply(func_tostring, func, []).replace('\n   ', '').replace('\n}', ' }') == 'function ' + func.name + '() { [native code] }',
-				has_prop: (obj, prop) => prop && obj && Reflect.apply(has_own_prop, obj, [ prop ]),
-				assign_func(func, bind){
-					if($rw.proxied.has(func))return $rw.proxied.get(func);
-					
-					var prox = Object.defineProperties(def.bind(def.is_native(func) ? new Proxy(func, { construct: (target, args, newt) => Reflect.construct(target, def.restore(...args), newt), apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)) }) : func, bind), Object.getOwnPropertyDescriptors(func));
-					
-					$rw.proxied.set(func, prox);
-					$rw.origina.set(prox, func);
-					
-					return prox;
-				},
-				restore: (...args) => Reflect.apply(arr_map, args, [ arg => arg ? $rw.origina.get(arg) || arg : arg ]),
-				proxify: (...args) => Reflect.apply(arr_map, args, [ arg => arg ? $rw.proxied.get(arg) || arg : arg ]),
-				prefix: {
-					origin: prop => prop.split('@').splice(-1).join(''),
-					name: prop => (typeof prop != 'string' ? 'prop' : prop) + '@' + new URL(this.unurl(def.get_href().href, $rw.meta)).hostname,
-					unname: (prop = '', split) => (split = prop.split('@'), split.splice(-1), split.join('')),
-				},
-				get_href(){ // return URL object of parent or current url
-					var x = def.loc ? def.loc.href : null;
-					
-					if(!x || !x.hostname)try{ x = global.parent.location.href }catch(err){}
-					try{ x = new URL(x) }catch(err){};
-					
-					return x;
-				},
-				url_binds: {
-					replace(url){
-						return def.loc.replace(thjs.url(url, { base: fills.url, origin: def.loc }));
-					},
-					assign(url){
-						return def.loc.assign(thjs.url(url, { base: fills.url, origin: def.loc }));
-					},
-					reload(){
-						def.loc.reload();
-					},
-				},
-				win_binds: {
-					eval: new Proxy(global.eval, { apply: (target, that, [ script ]) => Reflect.apply(target, that, [ global.rw_eval(script) ]) }),
-					constructor: global.Window,
-					Window: global.Window,
-					get location(){ return fills.url },
-					set location(value){ return fills.url.href = value },
-					// origin can be a getter
-					get origin(){ return fills.url.origin },
-					get parent(){ try{ return global.parent.$rw.proxied.get(global.parent) }catch(err){ return fills.this } },
-					get top(){ try{ return global.top.$rw.proxied.get(global.top) }catch(err){ return fills.this } },
-				},
-				doc_binds: {
-					get location(){ return fills.url },
-					set location(value){ return fills.url.href = value },
-				},
-			};
-		
-		def.loc = def.restore(global.location)[0];
-		def.doc = def.restore(global.document)[0];
-		
-		var fills = $rw.fills = {
-			def: def,
-			this: def.handler(global, {
-				get: (t, prop, rec, ret = Reflect.get(def.has_prop(def.win_binds, prop) ? def.win_binds : global, prop)) => $rw.proxied.get(ret) || typeof ret == 'object' && def.has_prop(ret, '$rw') && ret.$rw.fills.this || (typeof ret == 'function' ? def.assign_func(ret, global) : ret),
-				set: (t, prop, value) => def.has_prop(def.win_binds, prop) ? (def.win_binds[prop] = value) : Reflect.set(global, prop, value),
-			}),
-			doc: def.doc ? def.handler(def.doc, {
-				get: (t, prop, rec, ret) => def.has_prop(def.doc_binds, prop) ? def.doc_binds[prop] : (typeof (ret = Reflect.get(def.doc, prop))) == 'function' ? def.assign_func(ret, def.doc) : ret,
-				set: (t, prop, value) => Object.getOwnPropertyDescriptor(def.doc_binds, prop) ? (def.doc_binds[prop] = value) : Reflect.set(def.doc, prop, value),
-			}) : undefined,
-			url: def.loc ? def.handler(def.loc, {
-				get: (target, prop, ret) => {
-					if(!$rw.fixed_url && def.has_prop(def.url_binds, prop))return def.url_binds[prop];
-					
-					var temp = this.unurl($rw.fixed_url || def.loc.href, $rw.meta);
-					
-					if(fills._url)fills._url.href = temp;
-					else fills._url = new this.URL(temp);
-					
-					return typeof (ret = fills._url[prop]) == 'function' ? def.bind(ret, fills._url) : ret;
-				},
-				set: (target, prop, value) => {
-					if($rw.fixed_url)return true; // in worker
-					
-					var temp = this.unurl(def.loc, { origin: def.loc.origin });
-					
-					if(fills._url)fills._url.href = temp;
-					else fills._url = new this.URL(temp);
-					
-					if(temp.href != ohref)def.loc.href = this.url(temp.href, { url: this.unurl(def.loc, { origin: def.loc }), origin: def.loc });
-					
-					return true;
-				},
-			}) : undefined,
-		};
-		
-		$rw.proxy_o.add(fills.this);
-		$rw.proxy_o.add(fills.url);
-		$rw.proxy_o.add(fills.doc);
-		
-		$rw.proxied.set(global, fills.this);
-		$rw.origina.set(fills.this, global);
-		
-		if(def.loc){
-			$rw.proxied.set(def.loc, fills.url);
-			$rw.origina.set(fills.url, def.loc);
+			global.$rw_get = rw_get;
+			global.$rw_set = rw_set;
+			global.$rw_call = rw_call;
+			global.$rw_proxy = rw_proxy;
+			global.$rw_eval = rw_eval;
+			global.$rw_eval_prop = rw_eval_prop;
 		}
-		
-		if(def.doc){
-			$rw.proxied.set(def.doc, fills.doc);
-			$rw.origina.set(fills.doc, def.doc);
-		}
-		
-		global.rw_this = that => $rw.proxied.has(that) ? $rw.proxied.get(that) : that;
-		
-		fills.rw_eval = script => script ? '(()=>' + this.js('eval(' + JSON.stringify(script) + ')', $rw.meta, { global: true, append_fills: 'return ', rewrite_eval: false }) + ')()' : script;
-		
-		// called as argument in import()
-		global.rw_url = (url, rw_fills) => {
-			return this.url(url, { js: true, origin: def.loc, base: $rw.url });
-		};
-		
-		global.prop_eval = script => eval('return(()=>' + this.js('(()=>{' + atob(decodeURIComponent(script)) + '\n})()', $rw.meta, { global: true, append_fills: 'return' }) + ')()');
-		
-		[
-			[ 'Function', value => new Proxy(value, {
-				construct: (target, args) => {
-					var ref = Reflect.construct(target, args), script = args.splice(-1)[0];
-					
-					return Object.assign(Object.defineProperties(Reflect.construct(target, [ ...args, script ? 'return(()=>' + this.js('(()=>{' + script + '\n})()', $rw.meta, { global: true, append_fills: 'return' }) + ')()' : script ]), Object.getOwnPropertyDescriptors(ref)), { toString: def.bind(ref.toString, ref) });
-				},
-				apply: (target, that, args) => {
-					var ref = Reflect.apply(target, that, args), script = args.splice(-1)[0];
-					
-					return Object.assign(Object.defineProperties(Reflect.apply(target, that, [ ...args, script ? 'return(()=>' + this.js('(()=>{' + script + '\n})()', $rw.meta, { global: true, append_fills: 'return' }) + ')()' : script ]), Object.getOwnPropertyDescriptors(ref)), { toString: def.bind(ref.toString, ref) });
-				},
-			}) ],
-			[ 'Function', 'prototype', 'bind', value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, def.is_native(that) ? def.restore(that)[0] : that, def.is_native(that) ? def.restore(...args) : args),
-			}) ],
-			[ 'Function', 'prototype', 'apply', value => new Proxy(value, {
-				apply: (target, that, [ tht, arg ]) => Reflect.apply(target, def.is_native(that) ? def.restore(that)[0] : that, [ def.is_native(that) ? def.restore(tht)[0] : tht, arg && def.is_native(that) && def.has_prop(arg, Symbol.iterator) ? def.restore(...Reflect.apply(arr_iterate, arg, [])) : arg ]),
-			}) ],
-			[ 'Function', 'prototype', 'call', value => new Proxy(value, {
-				apply: (target, that, [ tht, ...args ]) => Reflect.apply(target, def.is_native(that) ? def.restore(that)[0] : that, [ def.is_native(that) ? def.restore(tht)[0] : tht, ...(args && def.is_native(that) && def.has_prop(args, Symbol.iterator) ? def.restore(...Reflect.apply(arr_iterate, args, [])) : args) ]),
-			}) ],
-			[ 'fetch', value => new Proxy(value, { apply: (target, that, [ url, opts ]) => Reflect.apply(target, global, [ this.url(url, $rw.meta, { route: false }), opts ]) }) ],
-			[ 'Blob', value => new Proxy(value, {
-				construct: (target, [ data, opts ]) => {
-					var decoded = opts && this.mime.js.includes(opts.type) && Array.isArray(data) ? [ this.js(this.decode_blob(data), { url: fills.url, origin: def.loc }) ] : data,
-						blob = Reflect.construct(target, [ decoded, opts ]);
-					
-					$rw.blob.set(blob, decoded[0]);
-					
-					return blob;
-				},
-			}) ],
-			[ 'Document', 'prototype', 'write', value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, that, [ this.html(args.join(''), $rw.meta, { snippet: true }) ]),
-			}) ],
-			[ 'Document', 'prototype', 'writeln', value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, that, [ this.html(args.join(''), $rw.meta, { snippet: true }) ]),
-			}) ],
-			[ 'Document', 'prototype', 'open', value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, that, args.length === 3 ? [ this.url(args[0], $rw.meta), ...args.slice(1) ] : args),
-			}) ],
-			[ false, 'Document', 'prototype', (value, desc, otitle) => (otitle = def.doc.title, def.doc.title = this.config.title, Object.defineProperties(value, {
-				URL: { get: _ => fills.url.href },
-				documentURI: { get: _ => fills.url.href },
-				domain: { get: _ => fills.url.hostname },
-				referrer: { get: _ => this.unurl(Reflect.apply(desc.referrer.get, def.doc, []), $rw.meta) },
-				cookie: {
-					get: _ => this.cookie_decode(Reflect.apply(desc.cookie.get, def.doc, []), $rw.meta),
-					set: v => Reflect.apply(desc.cookie.set, global.document, [ this.cookie_encode(v, $rw.meta) ]),
-				},
-				title: {
-					get: _ => otitle,
-					set: _ => otitle = _,
-				},
-				defaultView: { get: _ => $rw.fills.this },
-			})) ],
-			[ 'WebSocket', value => new Proxy(value, {
-				construct: (target, [ url, proto ]) => {
-					var ws = Reflect.construct(target, [ this.url(url, $rw.meta, { ws: true }), proto ]);
-					
-					ws.addEventListener('message', event => event.data == 'srv-alive' && event.stopImmediatePropagation() + ws.send('srv-alive') || event.data == 'srv-open' && event.stopImmediatePropagation() + ws.dispatchEvent(new Event('open', { srcElement: ws, target: ws })));
-					
-					ws.addEventListener('open', event => event.stopImmediatePropagation(), { once: true });
-					
-					return ws
-				},
-			}) ],
-			[ 'URL', 'createObjectURL', value => new Proxy(value, {
-				apply: (target, that, [ source ]) => {
-					var url = Reflect.apply(target, that, [ source ]);
-					
-					$rw.urls.set(url, $rw.blob.get(source));
-					
-					return url;
-				},
-			}) ],
-			[ 'URL', 'revokeObjectURL', value => new Proxy(value, {
-				apply: (target, that, [ url ]) => {
-					var ret = Reflect.apply(target, that, [ url ]);
-					
-					$rw.urls.delete(url);
-					
-					return ret;
-				},
-			}) ],
-			[ 'Object', 'defineProperty', value => new Proxy(value, { apply: (target, that, [ obj, prop, desc ]) => Reflect.apply(target, that, [ obj, prop, def.desc(obj, prop, desc) ]) }) ],
-			[ 'Object', 'defineProperties', value => new Proxy(value, {
-				apply: (target, that, [ obj, descs ]) => Reflect.apply(target, that, [ obj, Object.fromEntries(Object.keys(descs).map(prop => [ prop, def.desc(obj, prop, descs[prop]) ])) ]),
-			}) ],
-			[ 'Reflect', 'defineProperty', value => new Proxy(value, { apply: (target, that, [ obj, prop, desc ]) => Reflect.apply(target, that, [ obj, prop, def.desc(obj, prop, desc) ]) }) ],
-			[ 'History', 'prototype', 'pushState', value => new Proxy(value, {
-				apply: (target, that, [ state, title, url ]) => Reflect.apply(target, that, [ state, title, this.url(url, $rw.meta) ]),
-			}) ],
-			[ 'History', 'prototype', 'replaceState', value => new Proxy(value, {
-				apply: (target, that, [ state, title, url ]) => Reflect.apply(target, that, [ state, title, this.url(url, $rw.meta) ]),
-			}) ],
-			[ 'IDBFactory', 'prototype', 'open', value => new Proxy(value, { apply: (target, that, [ name, version ]) => Reflect.apply(target, that, [ def.prefix.name(name), version ]) }) ],
-			[ 'localStorage', value => (delete global.localStorage, new Proxy(value, {
-				get: (target, prop, receiver, ret) => prop == $rw.orig ? target : prop == $rw.prox ? receiver : (typeof (ret = Reflect.get(target, prop)) == 'function' ? def.bind(ret, target) : target.getItem(prop)),
-				set: (target, prop, value) => (target.setItem(prop, value), true),
-			})) ],
-			[ 'sessionStorage', value => (delete global.sessionStorage, new Proxy(value, {
-				get: (target, prop, receiver, ret) => prop == $rw.orig ? target : prop == $rw.prox ? receiver : (typeof (ret = Reflect.get(target, prop)) == 'function' ? def.bind(ret, target) : target.getItem(prop)),
-				set: (target, prop, value) => (target.setItem(prop, value), true),
-			})) ],
-			[ 'Storage', 'prototype', 'getItem', value => new Proxy(value, {
-				apply: (target, that, [ prop ]) => Reflect.apply(target, that, [ def.prefix.name(prop) ]),
-			}) ],
-			[ 'Storage', 'prototype', 'setItem', value => new Proxy(value, {
-				apply: (target, that, [ prop, value ]) => Reflect.apply(target, that, [ def.prefix.name(prop), value ]),
-			}) ],
-			[ 'Storage', 'prototype', 'removeItem', value => new Proxy(value, {
-				apply: (target, that, [ prop, ]) => Reflect.apply(target, that, [ def.prefix.name(prop) ]),
-			}) ],
-			[ 'Storage', 'prototype', 'clear', value => new Proxy(value, {
-				apply: (target, that) => Object.keys(that).forEach(val => def.prefix.origin(val) == fills.url.hostname && that.removeItem(prop))
-			}) ],
-			[ 'Storage', 'prototype', 'key', value => new Proxy(value, {
-				apply: (target, that, [ key ]) => def.prefix.unname(Reflect.apply(target, that, [ key ])),
-			}) ],
-			[ 'importScripts', value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, that, args.map(url => this.url(url, $rw.meta, { type: 'js' }))),
-			}) ],
-			[ 'XMLHttpRequest', 'prototype', 'open', value => new Proxy(value, {
-				apply: (target, that, [ method, url, ...args ]) => Reflect.apply(target, that, [ method, this.url(url, $rw.meta, { route: false }), ...args ]),
-			}) ],
-			[ 'Navigator', 'prototype', 'sendBeacon', value => new Proxy(value, {
-				apply: (target, that, [ url, data ]) => Reflect.apply(target, that, [ this.url(url, $rw.meta), data ]),
-			}) ],
-			[ 'window', 'open', value => new Proxy(value, {
-				apply: (target, that, [ url, name, features ]) => Reflect.apply(target, that, [ this.url(url, $rw.meta), name, features ]),
-			}) ],
-			[ 'Worker', value => new Proxy(value, {
-				construct: (target, [ url, options ]) => Reflect.construct(target, [ this.url(url, $rw.meta, {  type: 'js' }), options ]),
-			}) ],
-			[ 'FontFace', value => new Proxy(value, {
-				construct: (target, [ family, source, descriptors ]) => Reflect.construct(target, [ family, this.url(source, $rw.meta, {  type: 'font' }), descriptors ]),
-			}) ],
-			[ 'ServiceWorkerContainer', 'prototype', 'register', value => new Proxy(value, {
-				apply: (target, that, [ url, options ]) => new Promise((resolve, reject) => reject(new Error('A Service Worker has been blocked for this domain'))),
-			}) ],
-			[ 'postMessage', value => new Proxy(value, {
-				apply: (target, that, [ message, origin, transfer ]) => typeof global.WorkerNavigator == 'function' ? Reflect.apply(target, that, [ message, origin, transfer ]) : Reflect.apply(target, that, [ [ 'proxied', origin, message ], def.get_href().href, transfer ]),
-			}) ],
-			[ 'MouseEvent', 'prototype', 'initMouseEvent', value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)),
-			}) ],
-			[ 'KeyboardEvent', 'prototype', 'initKeyboardEvent', value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)),
-			}) ],
-			[ 'Document', 'prototype', 'querySelector', value => new Proxy(value, {
-				apply: (target, that, [ query ]) => Reflect.apply(target, that, [ this.css(query, $rw.meta) ]),
-			}) ],
-			[ 'Document', 'prototype', 'querySelectorAll', value => new Proxy(value, {
-				apply: (target, that, [ query ]) => Reflect.apply(target, that, [ this.css(query, $rw.meta) ]),
-			}) ],
-			[ 'getComputedStyle', value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, def.restore(that)[0], def.restore(...args).map(x => x instanceof Element ? x : def.doc.body)),
-			}) ],
-			[ 'CSSStyleDeclaration', 'prototype', 'getPropertyValue', value => new Proxy(value, {
-				apply: (target, that, [ prop, value ]) => this.css(Reflect.apply(target, that, [ prop ]), $rw.meta),
-			}) ],
-			[ 'CSSStyleDeclaration', 'prototype', 'setProperty', value => new Proxy(value, {
-				apply: (target, that, [ prop, value ]) => Reflect.apply(target, that, [ prop, this.css(value, $rw.meta, { prop: prop }) ]),
-			}) ],
-			// route rewritten props to the hooked function
-			[ 'CSSStyleDeclaration', value => (this.attr.css_keys.forEach(prop => Object.defineProperty(value.prototype, prop, {
-				get(){
-					// thjs.uncss()
-					return this.getPropertyValue(prop);
-				},
-				set(value){
-					return this.setProperty(prop, thjs.css(value, $rw.meta, { keep_input: true }));
-				},
-			})), value) ],
-			[ 'Document', 'prototype', 'createTreeWalker', value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, def.restore(that)[0], def.restore(...args)),
-			}) ],
-			[ 'Node', 'prototype', 'contains', value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)),
-			}) ],
-			[ 'MutationObserver', 'prototype', 'observe', value => new Proxy(value, {
-				apply: (target, that, args) => Reflect.apply(target, that, def.restore(...args)),
-			}) ],
-			[ 'Audio', value => class extends value {
-				constructor(url){
-					super(thjs.url(url, { base: fills.url, origin: def.loc, route: false }));
-				}
-			} ],
-			/*
-			[ x => x ? (placeholder = x) : placeholder, value => placeholder ],
-			todo: cookieStore
-			*/
-		].forEach(hooks => {
-			for(var set_prop = typeof hooks[0] == 'boolean' ? hooks.splice(0, 1)[0] : true, new_value, callback = hooks.splice(-1)[0], depth = global, prev_depth, prev_hook, ind = 0; ind < hooks.length; ind++){
-				if(!depth[hooks[ind]])return;
-				
-				prev_depth = depth;
-				prev_hook = hooks[ind];
-				depth = depth[hooks[ind]];
-			}
-			
-			// !def.is_native(depth) || 
-			if($rw.proxied.has(depth) || $rw.origina.has(depth))return;
-			
-			new_value = callback(depth, Object.getOwnPropertyDescriptors(depth));
-			
-			if(set_prop)prev_depth[prev_hook] = new_value;
-			
-			$rw.origina.set(new_value, depth);
-			$rw.proxied.set(depth, prev_depth[prev_hook]);
-		});
-		
-		return fills;
 	}
 	/**
 	* Serializes a JSDOM or DOMParser object

@@ -29,14 +29,6 @@ ${ti}
 npm i sys-proxy
 ${ti}
 
-## Significant sites tested ( as of 2/22/2021 ):
-
-- krunker.io
-- 1v1.lol
-- justbuild.lol
-- youtube.com ( only player )
-- twitch.tv
-
 ### Demo:
 
 See the [demo folder](demo/) for more usage examples
@@ -62,38 +54,9 @@ ${ti}
 
 ${docs}
 
-## How it works:
+### JS rewriting:
 
-Recieve request => parse URL => send request to server => rewrite content => send to client
-
-### JS:
-
-To achieve accuracy when rewriting, this proxy uses "scoping". All js is wrapped in a [closure](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Closures) to override variables that otherwise are not possible normally (window, document)
-
-[Proxies](https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Proxy) are used to change or extend any value to be in line with rewriting URLs
-
-Any occurance of ${t}this${t} is changed to call the global rw_this function with the ${t}this${t} value, if the ${t}this${t} value has a property indicating that the value has a proxied version, return the proxied version.
-
-An example:
-
-Call the rewriter and parse:
-${ti}
-if(window.location == this.location)alert('Everything checks out!');
-${ti}
-
-Expected result:
-
-${ti}
-{let fills=<bundled code>,window=fills.this,document=fills.document;if(window.location == rw_this(this).location)alert('Everything checks out!');
-//# sourceURL=anonymous:1
-}
-${ti}
-
-${t}this${t} in the input code is defined as ${t}window${t}, the ${t}window${t} has a proxied version that will also determine if any properties are proxied and give a result.
-
-${t}this${t} => ${t}fills.this${t}
-
-${t}this.location${t} => ${t}fills.url${t}
+section under work
 
 #### HTML rewriting:
 
@@ -131,4 +94,9 @@ Each property is iterated and in the rewriter a huge array containing informatio
 ### Manifest:
 
 A basic JSON.stringify checking if the key is ${t}src${t} or ${t}key${t} or ${t}start_url${t} and if it is then the rewriters URL handler is used to determine the result.
+
+### Credits:
+
+- https://github.com/DevExpress/testcafe-hammerhead for various modules such as acorn-hammerhead and esotope-hammerhead
+
 `)).then(() => console.log('finished writing docs, find output at ' + __dirname));

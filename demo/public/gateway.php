@@ -12,6 +12,6 @@ else{
 	// todo: add cookie auth
 	res.cookies.gateway = { value: 'sp', samesite: 'lax' };
 	
-	return res.redirect(rw.url(url, { origin: req.url.origin, base: 'null' }));
+	return res.redirect(rw.url(url, { origin: req.url.origin, base: 'about:' }));
 }
 ?>
