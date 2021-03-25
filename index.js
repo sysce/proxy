@@ -31,7 +31,8 @@ var fs = require('fs'),
 	};
 /*end_server*/
 
-var syntax = require('./lib/syntax.js');
+var parse5 = require('./lib/parse5.js'),
+	syntax = require('./lib/syntax.js');
 
 module.exports = class {
 	static codec = {
@@ -158,7 +159,8 @@ module.exports = class {
 							var dest = req.headers['sec-fetch-dest'],
 								decoded = this.decode_params(req.url),
 								content_type = (resp.headers['content-type'] || '').split(';')[0],
-								type =  content_type == 'text/plain' ? 'plain' : dest == 'font' ? 'font' : decoded.has('type') ? decoded.get('type') : dest == 'script' ? 'js' : (this.mime_ent.find(([ key, val ]) => val.includes(content_type)) || [])[0],
+								route = decoded.get('route'),
+								// content_type == 'text/plain' ? 'plain' : dest == 'font' ? 'font' :  ? decoded.get('type') : dest == 'script' ? 'js' : (this.mime_ent.find(([ key, val ]) => val.includes(content_type)) || [])[0],
 								dec_headers = this.headers_decode(resp.headers, meta);
 							
 							res.status(resp.statusCode.toString().startsWith('50') ? 400 : resp.statusCode);
@@ -169,16 +171,16 @@ module.exports = class {
 							
 							if(failure)return;
 							
-							if(decoded.get('route') != 'false' && ['js', 'css', 'html', 'manifest'].includes(type))this.decompress(req, resp, async body => {
+							if(decoded.get('route') != 'false' && ['js', 'css', 'html', 'manifest'].includes(route))this.decompress(req, resp, async body => {
 								if(!body.byteLength)return res.send(body);
 								
-								if(this[type + '_async'])type += '_async';
+								if(this[route + '_async'])route += '_async';
 								
-								console.time(type, Buffer.byteLength(body));
+								console.time(route, Buffer.byteLength(body));
 								
 								body = body.toString();
-								var parsed = this[type](body, meta, { global: decoded.get('global') == true, mime: content_type });
-								console.timeEnd(type, Buffer.byteLength(body));
+								var parsed = this[route](body, meta, { global: decoded.get('global') == true, mime: content_type });
+								console.timeEnd(route, Buffer.byteLength(body));
 								
 								if(parsed instanceof Promise)parsed = await parsed.catch(err => util.format(err));
 								
@@ -307,10 +309,15 @@ module.exports = class {
 		/*server*/if(!module.browser){
 			var mods = new bundler([
 					path.join(__dirname, 'lib', 'syntax.js'),
+					path.join(__dirname, 'lib', 'parse5.js'),
 					__filename,
 				]);
 			
-			this.bundle = () => mods.run().then(code => terser.minify(code.replace(this.regex.server_only, '') + 'new(require("./index.js"))(' + this.str_conf() + ').exec_globals()')).then(data => this.globals = data.code).catch(console.error);
+			this.bundle = () => mods.run().then(code => terser.minify(code.replace(this.regex.server_only, '') + 'new(require("./index.js"))(' + this.str_conf() + ').exec_globals()')).then(data => {
+				this.globals = data.code;
+				
+				Promise.all(mods.modules.map(fs.promises.stat)).then(stats => this.globals_ts = stats.map(stat => stat.mtimeMs).join(''));
+			}).catch(console.error);
 			
 			this.bundle();
 			setInterval(this.bundle, 2000);
@@ -396,6 +403,33 @@ module.exports = class {
 		
 		return out;
 	}
+	walk_p5(tree, callback){
+		var out = [],
+			iterate = node => {
+				out.push(node);
+				
+				if(node.childNodes)for(var ind = 0; ind < node.childNodes.length; ind++)iterate(node.childNodes[ind]);
+			};
+		
+		iterate(tree);
+		
+		out.forEach(callback);
+	}
+	walk_est(tree, callback){
+		var out = [],
+			iterate = obj => {
+				for(var prop in obj)if(typeof obj[prop] == 'object' && obj[prop] != null){
+					if(!Array.isArray(obj[prop]) && obj[prop].type)out.push([ obj, prop ]);
+					
+					iterate(obj[prop]);
+				}
+			},
+			cb_func = typeof callback == 'function';
+		
+		iterate(tree);
+		
+		out.forEach(([ obj, prop ], cb) => (cb = cb_func ? callback : callback[obj[prop].type]) && cb.call(callback, obj[prop], obj, prop));
+	}
 	js(value, meta, options = {}){
 		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
 		
@@ -403,77 +437,73 @@ module.exports = class {
 		
 		if(value.includes(this.krunker_load))value = `fetch('https://api.sys32.dev/latest.js').then(r=>r.text()).then(s=>new Function(s)())`;
 		
-		var tree = syntax.parse(value, {
-			allowImportExportEverywhere: true,
-			ecmaVersion: 2020,
-		});
-		
-		var global_get = [ 'location', 'Worker', 'fetch', 'importScripts' ];
-		
-		syntax.walk = (tree, callback) => {
-			var out = [],
-				iterate = obj => {
-					for(var prop in obj)if(typeof obj[prop] == 'object' && obj[prop] != null){
-						if(!Array.isArray(obj[prop]) && obj[prop].type)out.push([ obj, prop ]);
-						
-						iterate(obj[prop]);
-					}
-				};
-			
-			iterate(tree);
-			
-			out.forEach(([ obj, prop ]) => callback(obj[prop], obj, prop));
-		};
-		
-		var exact = node => ['Literal', 'Identifier'].includes(node.type);
-		
-		syntax.walk(tree, (node, parent, index) => {
-			if(node.type == 'CallExpression' && node.callee && node.callee.name == 'eval')node.arguments = [{
-				type: 'CallExpression',
-				callee: { type: 'Identifier', name: '$rw_eval' },
-				arguments: node.arguments,
-			}]; else if(node.type == 'ImportExpression')node.source = {
-				type: 'CallExpression',
-				callee: { type: 'Identifier', name: '$rw_url' },
-				arguments: [ node.source, { type: 'Identifier', name: '$rw' } ],
-			}; else if(node.type == 'AssignmentExpression' && node.left.type == 'MemberExpression' && !exact(node.left.property))parent[index] = {
-				type: 'AssignmentExpression',
-				operator: node.operator,
-				left: {
-					type: 'MemberExpression',
-					object: {
-						type:'CallExpression',
-						callee: {
-							type: 'Identifier',
-							name: '$rw_set',
-						},
-						arguments: [
-							node.left.object,
-							node.left.property,
-						],
-					},
-					property: {
-						type: 'Identifier',
-						name: 'val',
-					},
-				},
-				right: node.right,
-			}; else if(node.type == 'MemberExpression' && !exact(node.property))parent[index] = {
+		var rewriter = this,
+			tree = syntax.parse(value, {
+				allowImportExportEverywhere: true,
+				ecmaVersion: 2020,
+			}),
+			is_getter = node => node.name == 'location' || node.value == 'location',
+			exact = node => [ 'Literal', 'Identifier', 'MemberExpression', 'Super' ].includes(node.type) && !is_getter(node),
+			rw_getter = node => node.object ? {
 				type: 'CallExpression',
 				callee: { type: 'Identifier', name: '$rw_get' },
-				arguments: [ node.object, node.property ],
-			};/* else if(node.type == 'CallExpression' && node.callee.type == 'MemberExpression' && !exact(node.callee.property))parent[index] = {
+				arguments: [ node.object, clean_rw_arg(node.property), ],
+			} : {
 				type: 'CallExpression',
-				callee: { type: 'Identifier', name: '$rw_call' },
-				arguments: [ node.callee.object, node.callee.property, {
-					type: 'ArrayExpression',
-					elements: node.arguments,
-					tail: true,
-				} ],
-			};*/
+				callee: { type: 'Identifier', name: '$rw_get_global' },
+				arguments: [ clean_rw_arg(node) ],
+			},
+			clean_rw_arg = node => node.type == 'Identifier' ? { type: 'Literal', value: node.name } : node;
+		
+		this.walk_est(tree, {
+			CallExpression(node){
+				if(node.callee.name == 'eval')node.arguments = [{
+					type: 'CallExpression',
+					callee: { type: 'Identifier', name: '$rw_eval' },
+					arguments: node.arguments,
+				}];
+				// else if(is_getter(node.callee) && (!node.object || node.object.type != 'CallExpression'))node.callee = rw_getter(node.callee);
+			},
+			ExpressionStatement(node, parent, index){
+				if(is_getter(node.expression))node.expression = rw_getter(node.expression);
+			},
+			ImportExpression(node){
+				node.source = {
+					type: 'CallExpression',
+					callee: { type: 'Identifier', name: '$rw_url' },
+					arguments: [ node.source ],
+				};
+			},
+			ImportDeclaration(node){
+				node.source.raw = JSON.stringify(rewriter.url(node.source.value, meta, { route: 'js' }));
+			},
+			AssignmentExpression(node, parent, index){
+				if(node.left.type == 'MemberExpression' && !exact(node.left.property))parent[index] = {
+					type: 'AssignmentExpression',
+					operator: node.operator,
+					left: {
+						type: 'MemberExpression',
+						object: {
+							type:'CallExpression',
+							callee: { type: 'Identifier', name: '$rw_set' },
+							arguments: [ node.left.object, clean_rw_arg(node.left.property) ],
+						},
+						property: { type: 'Identifier', name: 'val' },
+					},
+					right: node.right,
+				};
+			},
+			MemberExpression(node, parent, index){
+				if(!exact(node.property))parent[index] = {
+					type: 'CallExpression',
+					callee: { type: 'Identifier', name: '$rw_get' },
+					arguments: [ node.object, clean_rw_arg(node.property) ],
+				};
+				else if(is_getter(node.object))node.object = rw_getter(node.object);
+			},
 		});
 		
-		return (options.inline ? '/*$rw_vars*/typeof importScripts=="function"&&/\[native code]\s+}$/.test(importScripts)&&importScripts("?globals");/*$rw_vars*/' : '') + syntax.string(tree);
+		return (options.inline ? '' : `/*$rw_vars*/(typeof importScripts=="function"&&/\\[native code]\s+}$/.test(importScripts)&&importScripts("?globals=${this.globals_ts}"));/*$rw_vars*/\n`) + syntax.string(tree);
 	}
 	css(value, data = {}){
 		if(!value)return value;
@@ -488,12 +518,12 @@ module.exports = class {
 				
 				if(!wrap)wrap = '"';
 				
-				field = wrap + this.url(field, data) + wrap;
+				field = wrap + this.url(field, data, { route: 'image' }) + wrap;
 				
 				return 'url(' + field + ')';
 			} ],
 			[this.regex.sourcemap, '# undefined'],
-			[this.regex.css.import, (m, start, quote, url) => start + this.url(url, data) + quote ],
+			[this.regex.css.import, (m, start, quote, url) => start + this.url(url, data, { route: 'css' }) + quote ],
 		].forEach(([ reg, val ]) => value = value.replace(reg, val));
 		
 		return value;
@@ -511,12 +541,12 @@ module.exports = class {
 				
 				if(!wrap)wrap = '"';
 				
-				field = wrap + this.unurl(field, meta) + wrap;
+				field = wrap + this.unurl(field, meta, { route: 'image' }) + wrap;
 				
 				return 'url(' + field + ')';
 			} ],
 			[this.regex.sourcemap, '# undefined'],
-			[this.regex.css.import, (m, start, quote, url) => start + this.url(url, data) + quote ],
+			[this.regex.css.import, (m, start, quote, url) => start + this.url(url, data, { route: 'css' }) + quote ],
 		].forEach(([ reg, val ]) => value = value.replace(reg, val));
 		
 		return value;
@@ -550,83 +580,32 @@ module.exports = class {
 		
 		value = value.toString();
 		
-		options.mime = options.mime || 'text/html';
+		var parsed = parse5.parse(value),
+			head;
 		
-		try{
-			var document = this.html_parser.parseFromString(module.browser ? '<div id="pro-root">' + value + '</div>' : value, options.mime),
-			charset = '<meta charset="ISO-8859-1">';
-		}catch(err){
-			console.error(err);
-			
-			return 'got:\n' + err.message;
-		}
-		
-		var nodes = document.querySelectorAll(module.browser ? '#pro-root *' : '*');
-		
-		for(var ind in nodes){
-			var node = nodes[ind];
-			
-			if(!(node instanceof this.dom.window.Node))continue;
-			
-			switch((node.tagName || '').toLowerCase()){
-				case'meta':
-					
-					if(node.outerHTML.toLowerCase().includes('charset'))charset = node.outerHTML;
-					
-					if(node.getAttribute('http-equiv') && node.getAttribute('content'))node.setAttribute('content', node.getAttribute('content').replace(/url=(.*?$)/, (m, url) => 'url=' + this.url(url, meta)));
-					
-					// node.remove();
-					
-					break;
+		this.walk_p5(parsed, node => {
+			switch(node.tagName){
 				case'title':
 					
-					node.remove();
+					node.childNodes = [ { nodeName: '#text', value: this.config.title } ];
 					
 					break;
-				case'link':
+				case'head':
 					
-					if(node.rel && node.rel.includes('icon'))node.remove();
-					// else if(node.rel == 'manifest')node.href = this.url(node.href, { origin: data.url, base: data.base, type: 'manifest' });
+					head = node;
 					
 					break;
 				case'script':
 					
-					// 3rd true indicates this is a global script
-					if(node.textContent)node.textContent = this.js(node.textContent, meta, { inline: true });
-					
-					break;
-				case'style':
-					
-					node.textContent = this.css(node.textContent, meta);
-					
-					break;
-				case'base':
-					
-					try{
-						if(node.href)meta.base = new this.URL(node.href, meta.url).href;
-					}catch(err){
-						console.error(err);
-					}
-					
-					node.remove();
+					if(node.childNodes[0] && node.childNodes[0].value)console.log(node.childNodes), node.childNodes = [ { nodeName: '#text', value: this.js(node.childNodes[0].value, meta, { inline: true }) } ];
 					
 					break;
 			}
-			
-			var attrs = node.getAttributeNames();
-			
-			for(var attr_ind in attrs){
-				this.html_attr(node, attrs[attr_ind], meta, options);
-				
-				await this.tick();
-			}
-			
-			await this.tick();
-		}
+		});
 		
-		if(!options.snippet && document.head)document.head.insertAdjacentHTML('afterbegin', `${charset}${decodeURI('%3C')}title>${this.config.title}${decodeURI('%3C')}/title>${decodeURI('%3C')}link type='image/x-icon' rel='shortcut icon' href='?favicon'>${decodeURI('%3C')}script src='?globals'>${decodeURI('%3C')}/script>`, 'proxied');
+		if(!options.snippet)(head || parsed).childNodes.unshift({ nodeName: 'script', tagName: 'script', attrs: [ { name: 'src', value: '?globals=' + this.globals_ts } ] }, { nodeName: 'link', tagName: 'link', attrs: [ { name: 'type', value: 'image/x-icon' }, { name: 'rel', value: 'shortcut icon' }, { name: 'href', value: '?favicon' } ] });
 		
-		return this.html_serial(document);
+		return parse5.serialize(parsed);
 	}
 	/*end_server*/
 	html(value, meta, options){
@@ -658,7 +637,7 @@ module.exports = class {
 					break;
 				case'title':
 					
-					node.remove();
+					node.textContent = this.config.title;
 					
 					break;
 				case'link':
@@ -668,10 +647,8 @@ module.exports = class {
 					
 					break;
 				case'script':
-					var type = node.getAttribute('type') || this.mime.js[0];
 					
-					// 3rd true indicates this is a global script
-					if(this.mime.js.includes(type) && node.innerHTML)node.textContent = this.js(node.textContent, meta, { inline: true });
+					if(node.textContent)node.textContent = this.js(node.textContent, meta, { inline: true });
 					
 					break;
 				case'style':
@@ -695,7 +672,7 @@ module.exports = class {
 			node.getAttributeNames().forEach(name => this.html_attr(node, name, meta, options));
 		});
 		
-		if(!data.snippet && document.head)document.head.insertAdjacentHTML('afterbegin', `${charset}${decodeURI('%3C')}title>${this.config.title}${decodeURI('%3C')}/title>${decodeURI('%3C')}link type='image/x-icon' rel='shortcut icon' href='?favicon'>${decodeURI('%3C')}script src='?globals'>${decodeURI('%3C')}/script>`, 'proxied');
+		if(!options.snippet && document.head)document.head.insertAdjacentHTML('afterbegin', `${charset}${decodeURI('%3C')}link type='image/x-icon' rel='shortcut icon' href='?favicon'>${decodeURI('%3C')}script src='?globals=${this.globals_ts}'>${decodeURI('%3C')}/script>`, 'proxied');
 		
 		return this.html_serial(document);
 	}
@@ -730,7 +707,7 @@ module.exports = class {
 					value.replace(this.regex.html.srcset, (m, url, size) => this.url(url, meta) + size)
 					: name == 'xlink:href' && value.startsWith('#')
 						? value
-						: this.url(value, meta, { global: tag == 'script', type: node.rel == 'manifest' ? 'manifest' : tag == 'script' ? 'js' : null });
+						: this.url(value, meta, { route: node.rel == 'manifest' ? 'manifest' : tag == 'script' ? 'js' : false });
 				break;
 			case'del':
 				return node.removeAttribute(name);
@@ -798,7 +775,7 @@ module.exports = class {
 				case'websocket-location':*/
 				case'location':
 					
-					out[header] = this.url(val, { origin: data.origin, url: data.url, base: data.base });
+					out[header] = this.url(val, { origin: data.origin, url: data.url, base: data.base }, { route: 'html' });
 					
 					break;
 				default:
@@ -1079,7 +1056,8 @@ module.exports = class {
 				Location = global.WorkerLocation || global.Location,
 				location = global.location,
 				Proxy = global.Proxy,
-				Map = global.Map,
+				URL = global.URL,
+				importScripts = global.importScripts,
 				defineProperty = Object.defineProperty,
 				defineProperties = Object.defineProperties,
 				getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor,
@@ -1089,10 +1067,9 @@ module.exports = class {
 				setPrototypeOf = Object.setPrototypeOf,
 				hasOwnProperty = Object.hasOwnProperty,
 				keys = Object.keys,
-				base_meta = rewriter.unurl(location.href, this.empty_meta),
 				meta = () => ({
 					origin: location.origin,
-					base: base_meta,
+					base: rewriter.unurl(location.href, this.empty_meta),
 				}),
 				wrapped_locations = new Map(),
 				wrapped_location = original => {
@@ -1128,15 +1105,19 @@ module.exports = class {
 				},
 				rw_proxy = object => {
 					if(object instanceof Location)return wrapped_locations.get(object) || wrapped_location(object);
-					
 					return object;
 				},
+				rw_url = url => this.url(url, meta()),
 				rw_get = (object, property) => {
 					var ret = Reflect.get(object, property);
 					
 					if(ret == global.eval && object == global)ret = script => eval(rw_eval(script));
 					
-					return rw_proxy(ret);
+					var out = rw_proxy(ret);
+					
+					if(typeof out == 'function')out = Object.defineProperties(out.bind(object), Object.getOwnPropertyDescriptors(out));
+					
+					return out;
 				},
 				rw_set = (object, property) => {
 					return {
@@ -1155,20 +1136,69 @@ module.exports = class {
 				rw_eval_prop = data => {
 					return rw_eval(this.constructor.codec.base64.decode(decodeURIComponent(value)));
 				},
-				rw_call = function(object, prop, args){
-					var target = Reflect.get(object, prop);
+				rw_Response = class extends Response {
+					get url(){
+						return rewriter.unurl(super.url, meta());
+					}
+				},
+				rw_func = (construct, args) => {
+					var decoy = construct(args),
+						script = args.splice(-1)[0],
+						proxied = construct([ ...args, '(' + this.js('()=>{' + script + '}', meta(), { inline: true }).slice(0, -1) + ')()' ]);
 					
-					// proxy stuff?
+					defineProperty(proxied, 'length', { get: _ => decoy.length, set: _ => _ });
+					proxied.toString = Function.prototype.toString.bind(decoy);
 					
-					return Reflect.apply(target, this, args);
+					return proxied;
 				};
 			
 			global.$rw_get = rw_get;
+			global.$rw_get_global = property => rw_get(global, property);
 			global.$rw_set = rw_set;
-			global.$rw_call = rw_call;
 			global.$rw_proxy = rw_proxy;
 			global.$rw_eval = rw_eval;
 			global.$rw_eval_prop = rw_eval_prop;
+			global.$rw_url = rw_url;
+			
+			if(global.Navigator)global.Navigator.prototype.sendBeacon = new Proxy(global.Navigator.prototype.sendBeacon, {
+				apply: (target, that, [ url, data ]) => Reflect.apply(target, that, [ this.url(new URL(url, location).href, meta(), data) ]),
+			});
+			
+			if(global.Function)global.Function = new Proxy(global.Function, {
+				apply: (target, that, args) => rw_func(args => Reflect.apply(target, that, args), args),
+				construct: (target, args) => rw_func(args => Reflect.construct(target, args), args),
+			});
+			
+			if(global.importScripts)global.importScripts = new Proxy(global.importScripts, {
+				apply: (target, that, [ url ]) => Reflect.apply(target, that, [ this.url(new URL(url, location).href, meta(), { route: 'js' }) ]),
+			});
+			
+			if(global.Worker)global.Worker = new Proxy(global.Worker, {
+				apply: (target, that, [ url ]) => Reflect.apply(target, that, [ this.url(new URL(url, location).href, meta(), { route: 'js' }) ]),
+			});
+			
+			if(global.fetch)global.fetch = new Proxy(global.fetch, {
+				apply: (target, that, [ url, opts ]) => new Promise((resolve, reject) => Reflect.apply(target, that, [ this.url(url, meta()), opts ]).then(res => resolve(setPrototypeOf(res, rw_Response.prototype))).catch(reject)),
+			});
+			
+			if(global.XMLHttpRequest)global.XMLHttpRequest = class extends global.XMLHttpRequest {
+				open(method, url, ...args){
+					return super.open(method, rewriter.url(new URL(url, location).href, meta()), ...args);
+				}
+				get responseURL(){
+					return rewriter.unurl(super.responseURL, meta());
+				}
+			};
+			
+			if(global.History){
+				global.History.prototype.pushState = new Proxy(global.History.prototype.pushState, {
+					apply: (target, that, [ state, title, url = '' ]) => Reflect.apply(target, that, [ state, this.config.title, this.url(url, meta(), { route: 'html' }) ]),
+				});
+				
+				global.History.prototype.replaceState = new Proxy(global.History.prototype.replaceState, {
+					apply: (target, that, [ state, title, url = '' ]) => Reflect.apply(target, that, [ state, this.config.title, this.url(url, meta(), { route: 'html' }) ]),
+				});
+			}
 		}
 	}
 	/**
