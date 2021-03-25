@@ -28,10 +28,6 @@
 	"author": "systemya",
 	"license": "GPL-3.0",
 	"dependencies": {
-		"acorn-hammerhead": "^0.4.0",
-		"esotope": "^1.4.5",
-		"esotope-hammerhead": "^0.6.1",
-		"estree-walker": "^2.0.2",
 		"sys-nodehttp": "^1.5.1"
 	}
 }
