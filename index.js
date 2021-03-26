@@ -9,7 +9,56 @@ var fs = require('fs'),
 	nodehttp = require('sys-nodehttp'),
 	WebSocket = require('./lib/ws'),
 	terser = require('./lib/terser'),
-	jsdom = require('./lib/jsdom').JSDOM,
+	sqlite3 = class extends require('sqlite3').Database {
+		constructor(...args){
+			var callback = typeof args.slice(-1)[0] == 'function' && args.splice(-1)[0],
+				promise = new Promise((resolve, reject) => super(...args, err => {
+					var ind = this.wqueue.unknown.indexOf(promise);
+					
+					if(ind != -1)this.wqueue.unknown.splice(ind, 1);
+					
+					if(err)reject(err);
+					else resolve();
+				}));
+			
+			this.wqueue = { unknown: [ promise ] };
+		}
+		promisify(prop, [ query, ...args ]){
+			var	split = query.split(' '),
+				table = split.indexOf('from');
+			
+			if(table == -1)table = split.indexOf('into');
+			
+			if(table != -1)table = split[table + 1];
+			else table = 'unknown';
+			
+			if(!this.wqueue[table])this.wqueue[table] = [];
+			
+			var promise = new Promise((resolve, reject) => Promise.allSettled(this.wqueue[table]).then(() => {
+					var start = Date.now(), time;
+					
+					super[prop](query, ...args, (err, row, ind) => ((ind = this.wqueue[table].indexOf(promise)) != -1 && this.wqueue[table].splice(ind, 1), err ? reject(err) + console.error(query, '\n', err) : resolve(row)));
+					
+					time = Date.now() - start;
+					
+					// console.log(this.wqueue.length + ' - ' + time + ' MS - ' + args[0]);
+					if(time > 100)console.log(query + '\ntook ' + time + 'ms to execute, consider optimizing');
+				}));
+			
+			this.wqueue[table].push(promise);
+			
+			return promise;
+		}
+		get(...args){
+			return this.promisify('get', args);
+		}
+		all(...args){
+			return this.promisify('all', args);
+		}
+		run(...args){
+			return this.promisify('run', args);
+		}
+	},
 	bundler = class {
 		constructor(modules, wrapper = [ '', '' ]){
 			this.modules = modules;
@@ -28,7 +77,9 @@ var fs = require('fs'),
 		run(){
 			return new Promise((resolve, reject) => Promise.all(this.modules.map(data => new Promise((resolve, reject) => this.resolve_contents(data).then(text => resolve(this.wrap(new URL(this.relative_path(data), 'http:a').pathname) + '(module,exports,require,global){' + (data.endsWith('.json') ? 'module.exports=' + JSON.stringify(JSON.parse(text)) : text) + '}')).catch(err => reject('Cannot locate module ' + data + '\n' + err))))).then(mods => resolve(this.wrapper[0] + 'var require=((l,i,h)=>(h="http:a",i=e=>(n,f=l[typeof URL=="undefined"?n.replace(/\\.\\//,"/"):new URL(n,e).pathname],u={browser:!0})=>{if(!f)throw new TypeError("Cannot find module \'"+n+"\'");f.call(u.exports={},u,u.exports,i(h+f.name),new(_=>_).constructor("return this")());return u.exports},i(h)))({' + mods.join(',') + '});' + this.wrapper[1] )).catch(reject));
 		}
-	};
+	},
+	data = new sqlite3(path.join(__dirname, 'data.db'));
+
 /*end_server*/
 
 var parse5 = require('./lib/parse5.js'),
@@ -227,8 +278,6 @@ module.exports = class {
 							agent: ['wss:', 'https:'].includes(url.protocol) ? this.config.https_agent : this.config.http_agent,
 						}),
 						time = 8000,
-						timeout = setTimeout(() => srv.close(), time),
-						interval = setInterval(() => cli.send('srv-alive'), time / 2),
 						queue = [];
 					
 					srv.on('error', err => console.error(headers, url.href, util.format(err)) + cli.close());
@@ -238,13 +287,13 @@ module.exports = class {
 						
 						timeout = setTimeout(() => srv.close(), time);
 						
-						if(data != 'srv-alive' && srv.readyState == WebSocket.OPEN)srv.send(data);
+						if(srv.readyState == WebSocket.OPEN)srv.send(data);
 					});
 					
 					cli.on('close', code => (srv.readyState == WebSocket.OPEN && srv.close(), clearTimeout(timeout) + clearInterval(interval)));
 					
 					srv.on('open', () => {
-						cli.send('srv-open');
+						cli.send('open');
 						
 						srv.on('message', data => cli.send(data));
 					});
@@ -254,10 +303,6 @@ module.exports = class {
 			}
 		}
 		/*end_server*/
-		
-		this.dom = module.browser ? global : new jsdom();
-		
-		if(this.dom.window && this.dom.window.DOMParser)this.html_parser = new this.dom.window.DOMParser();
 		
 		this.regex = {
 			prw_ind: /\/\*(pmrw\d+)\*\/[\s\S]*?\/\*\1\*\//g,
@@ -294,6 +339,7 @@ module.exports = class {
 		this.mime_ent = Object.entries(this.mime);
 		
 		this.attr = {
+			inherits_url: ['Image','HTMLObjectElement','StyleSheet','SVGUseElement','SVGTextPathElement','SVGScriptElement','SVGPatternElement','SVGMPathElement','SVGImageElement','SVGGradientElement','SVGFilterElement','SVGFEImageElement','SVGAElement','HTMLTrackElement','HTMLSourceElement','HTMLScriptElement','HTMLMediaElement','HTMLLinkElement','HTMLImageElement','HTMLIFrameElement','HTMLFrameElement','HTMLEmbedElement','HTMLBaseElement','HTMLAreaElement','HTMLAudioElement','HTMLAnchorElement','CSSImportRule'],
 			html: [ [ 'iframe' ], [ 'srcdoc' ] ],
 			css: [ '*', [ 'style' ] ],
 			css_keys: [ 'background', 'background-image', 'src' ],
@@ -412,6 +458,18 @@ module.exports = class {
 			};
 		
 		iterate(tree);
+		
+		out.forEach(callback);
+	}
+	async walk_p5_async(tree, callback){
+		var out = [],
+			iterate = async node => {
+				out.push(node);
+				
+				if(node.childNodes)for(var ind = 0; ind < node.childNodes.length; ind++)await this.tick(), await iterate(node.childNodes[ind]);
+			};
+		
+		await iterate(tree);
 		
 		out.forEach(callback);
 	}
@@ -575,161 +633,124 @@ module.exports = class {
 	tick(){
 		return new Promise(resolve => process.nextTick(resolve));
 	}
+	process_node(node, meta, options){
+		if(node.childNodes)switch(node.tagName){
+			case'title':
+				
+				node.childNodes = [ { nodeName: '#text', value: this.config.title } ];
+				
+				break;
+			case'script':
+				
+				if(node.childNodes[0] && node.childNodes[0].value)node.childNodes[0].value = this.js(node.childNodes[0].value, meta, { inline: true });
+				
+				break;
+			case'style':
+				
+				if(node.childNodes[0] && node.childNodes[0].value)node.childNodes[0].value = this.css(node.childNodes[0].value, meta);
+				
+				break;
+		}
+		
+		if(node.attrs)node.attrs = node.attrs.map((attr, ind) => {
+			var data = this.attribute(node, attr.name, attr.value, meta);
+			
+			if(!data.modified)return attr;
+			if(data.deleted)return node.attrs[ind] = null;
+			
+			attr.name = data.name;
+			attr.value = data.value;
+			
+			if(data.preserve_source)node.attrs.push({ name: data.name + '-rw', value: data.value });
+			
+			return attr;
+		}).filter(attr => attr);
+	}
+	inject_head(){
+		return [ { nodeName: 'script', tagName: 'script', attrs: [ { name: 'src', value: '?globals=' + this.globals_ts } ] }, { nodeName: 'link', tagName: 'link', attrs: [ { name: 'type', value: 'image/x-icon' }, { name: 'rel', value: 'shortcut icon' }, { name: 'href', value: '?favicon' } ] } ];
+	}
 	async html_async(value, meta, options = {}){
 		if(!value)return value;
 		
+		this.validate_meta(meta);
+		
 		value = value.toString();
 		
-		var parsed = parse5.parse(value),
-			head;
+		var parsed = parse5.parse(value), head;
 		
-		this.walk_p5(parsed, node => {
-			switch(node.tagName){
-				case'title':
-					
-					node.childNodes = [ { nodeName: '#text', value: this.config.title } ];
-					
-					break;
-				case'head':
-					
-					head = node;
-					
-					break;
-				case'script':
-					
-					if(node.childNodes[0] && node.childNodes[0].value)console.log(node.childNodes), node.childNodes = [ { nodeName: '#text', value: this.js(node.childNodes[0].value, meta, { inline: true }) } ];
-					
-					break;
-			}
-		});
+		await this.walk_p5_async(parsed, node => (node.tagName == 'head' && (head = node), this.process_node(node, meta, options)));
 		
-		if(!options.snippet)(head || parsed).childNodes.unshift({ nodeName: 'script', tagName: 'script', attrs: [ { name: 'src', value: '?globals=' + this.globals_ts } ] }, { nodeName: 'link', tagName: 'link', attrs: [ { name: 'type', value: 'image/x-icon' }, { name: 'rel', value: 'shortcut icon' }, { name: 'href', value: '?favicon' } ] });
+		if(!options.snippet)(head || parsed).childNodes.unshift(...this.inject_head());
+		
+		return parse5.serialize(parsed);
+	}
+	html(value, meta, options = {}){
+		if(!value)return value;
+		
+		this.validate_meta(meta);
+		
+		value = value.toString();
+		
+		var parsed = parse5.parse(value), head;
+		
+		this.walk_p5(parsed, node => (node.tagName == 'head' && (head = node), this.process_node(node, meta, options)));
+		
+		if(!options.snippet)(head || parsed).childNodes.unshift(...this.inject_head());
 		
 		return parse5.serialize(parsed);
 	}
 	/*end_server*/
-	html(value, meta, options){
-		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
+	attribute(node, name, value, meta){
+		var data = {
+			modified: false,
+			deleted: false,
+			name: name,
+			value: value,
+			type: name.startsWith('on') ? 'js' : (this.attr_ent.find(x => (!node.tagName || x[1][0] == '*' || x[1][0].includes(node.tagName.toLowerCase())) && x[1][1].includes(name))||[])[0],
+			preserve_source: true, // add -rw attribute
+		};
 		
-		this.validate_meta(meta);
+		if(name.startsWith('data-'))return data;
 		
-		options.mime = options.mime || 'text/html';
-		
-		try{
-			var document = this.html_parser.parseFromString(module.browser ? '<div id="pro-root">' + value + '</div>' : value, options.mime),
-			charset = '<meta charset="ISO-8859-1">';
-		}catch(err){
-			console.error(err);
-			
-			return 'got:\n' + err.message;
-		}
-		
-		document.querySelectorAll(module.browser ? '#pro-root *' : '*').forEach(node => {
-			switch((node.tagName || '').toLowerCase()){
-				case'meta':
-					
-					if(node.outerHTML.toLowerCase().includes('charset'))charset = node.outerHTML;
-					
-					if(node.getAttribute('http-equiv') && node.getAttribute('content'))node.setAttribute('content', node.getAttribute('content').replace(/url=(.*?$)/, (m, url) => 'url=' + this.url(url, meta)));
-					
-					// node.remove();
-					
-					break;
-				case'title':
-					
-					node.textContent = this.config.title;
-					
-					break;
-				case'link':
-					
-					if(node.rel && node.rel.includes('icon'))node.remove();
-					// else if(node.rel == 'manifest')node.href = this.url(node.href, { origin: data.url, base: data.base, type: 'manifest' });
-					
-					break;
-				case'script':
-					
-					if(node.textContent)node.textContent = this.js(node.textContent, meta, { inline: true });
-					
-					break;
-				case'style':
-					
-					node.innerHTML = this.css(node.innerHTML, meta);
-					
-					break;
-				case'base':
-					
-					try{
-						if(node.href)meta.base = new this.URL(node.href, data.url).href;
-					}catch(err){
-						console.error(err);
-					}
-					
-					node.remove();
-					
-					break;
-			}
-			
-			node.getAttributeNames().forEach(name => this.html_attr(node, name, meta, options));
-		});
-		
-		if(!options.snippet && document.head)document.head.insertAdjacentHTML('afterbegin', `${charset}${decodeURI('%3C')}link type='image/x-icon' rel='shortcut icon' href='?favicon'>${decodeURI('%3C')}script src='?globals=${this.globals_ts}'>${decodeURI('%3C')}/script>`, 'proxied');
-		
-		return this.html_serial(document);
-	}
-	/**
-	* Validates and parses attributes, needs data since multiple handlers are called
-	* @param {Node|Object} node - Object containing at least getAttribute and setAttribute
-	* @param {String} name - Name of the attribute
-	* @param {Object} data - Standard object for all rewriter handlers
-	* @param {Object} data.origin - The page location or URL (eg localhost)
-	* @param {Object} [data.base] - Base URL, default is decoded version of the origin
-	* @param {Object} [data.route] - Adds to the query params if the result should be handled by the rewriter
-	*/
-	html_attr(node, name, meta, options){
-		if(name.startsWith('data-'))return;
-		
-		var ovalue, value = node.getAttribute(name);
-		
-		ovalue = value;
-		
-		if(!value)return;
-		
-		value = (value + '').replace(this.regex.newline, '');
-		
-		var	tag = node.tagName.toLowerCase(),
-			attr_type = this.attr_type(name, tag);
-		
-		node.setAttribute(name + '-rw', value);
-		
-		switch(attr_type){
+		switch(data.type){
 			case'url':
-				value = name == 'srcset' ?
-					value.replace(this.regex.html.srcset, (m, url, size) => this.url(url, meta) + size)
-					: name == 'xlink:href' && value.startsWith('#')
-						? value
-						: this.url(value, meta, { route: node.rel == 'manifest' ? 'manifest' : tag == 'script' ? 'js' : false });
+				
+				data.value = data.name == 'srcset' ?
+					data.value.replace(this.regex.html.srcset, (m, url, size) => this.url(url, meta) + size)
+					: name == 'xlink:href' && data.value.startsWith('#')
+						? data.value
+						: this.url(data.value, meta, { route: node.rel == 'manifest' ? 'manifest' : (node.tagName || '').toLowerCase() == 'script' ? 'js' : false, keep_input: true });
+				
+				data.modified = true;
+				
 				break;
 			case'del':
-				return node.removeAttribute(name);
+				
+				data.deleted = data.modified = true;
+				
 				break;
 			case'css':
-				value = this.css(value, meta);
+				
+				data.value = this.css(data.value, meta);
+				data.modified = true;
+				
 				break;
 			case'js':
-				value = '$rw_eval_prop(' + this.wrap(this.constructor.codec.base64.encode(unescape(encodeURIComponent(value)))) + ')';
+				
+				data.value = '$rw_eval_prop(' + this.wrap(unescape(encodeURIComponent(data.value))) + ')';
+				data.modified = true;
+				
 				break;
 			case'html':
-				value = this.html(value, meta, { snippet: true });
+				
+				data.value = this.html(data.value, meta, { snippet: true });
+				data.modified = true;
+				
 				break;
 		}
 		
-		try{ node.setAttribute(name, value) }catch(err){ console.error(err); node[name] = value };
+		return data;
 	}
-	/**
-	* Decoding blobs
-	* @param {Blob}
-	* @returns {String}
-	*/
 	decode_blob(data){ // blob => string
 		var decoder = new TextDecoder();
 		
@@ -738,21 +759,7 @@ module.exports = class {
 			else return decoder.decode(chunk);
 		}).join('');
 	}
-	/**
-	* Determines the attribute type using the `attr_ent` property
-	* @param {String} name - Property name
-	* @param {String} [tag] - Element tag
-	* @returns {String}
-	*/
-	attr_type(name, tag){
-		return name.startsWith('on') ? 'js' : (this.attr_ent.find(x => (!tag || x[1][0] == '*' || x[1][0].includes(tag)) && x[1][1].includes(name))||[])[0];
-	}
-	/**
-	* Prepares headers to be sent to the client from a server
-	* @param {Object} - Headers
-	* @returns {Object}
-	*/
-	headers_decode(value, data = {}){
+	headers_decode(value, meta){
 		var out = {};
 		
 		for(var header in value){
@@ -764,18 +771,12 @@ module.exports = class {
 					
 					out[header] = [];
 					
-					arr.forEach(val => out[header].push(this.cookie_encode(val, { origin: data.origin, url: data.url, base: data.base })));
+					arr.forEach(val => out[header].push(this.cookie_encode(val, meta)));
 					
 					break;
-				/*case'websocket-origin':
-					
-					out[header] = this.config.codec.decode(this.valid_url(data.url).searchParams.get('origin'), data) || this.valid_url(data.url).origin;
-					
-					break;
-				case'websocket-location':*/
 				case'location':
 					
-					out[header] = this.url(val, { origin: data.origin, url: data.url, base: data.base }, { route: 'html' });
+					out[header] = this.url(val, meta, { route: 'html' });
 					
 					break;
 				default:
@@ -786,22 +787,8 @@ module.exports = class {
 			}
 		};
 		
-		// soon?
-		// out['x-rwog'] = JSON.stringify(value);
-		
 		return out;
 	}
-	/**
-	* Prepares headers to be sent to the server from a client, calls URL handler so data object is needed
-	* @param {Object} - Headers
-	* @param {Object} data - Standard object for all rewriter handlers
-	* @param {Object} data.origin - The page location or URL (eg localhost)
-	* @param {Object} [data.base] - Base URL, default is decoded version of the origin
-	* @param {Object} [data.route] - Adds to the query params if the result should be handled by the rewriter
-	* @param {Object} [data.type] - The type of URL this is (eg js, css, html), helps the rewriter determine how to handle the response
-	* @param {Object} [data.ws] - If the URL is a WebSocket
-	* @returns {Object}
-	*/
 	/*server*/headers_encode(value, meta, options){
 		// prepare headers to be sent to a request url (eg google.com)
 		
@@ -854,102 +841,13 @@ module.exports = class {
 		
 		return out;
 	}/*end_server*/
-	construct_cookies(cookies, data = {}){
-		return cookies.filter(cookie => cookie && cookie.name && cookie.value).map(cookie => {
-			var out = [];
-			
-			out.push(cookie.name + '=' + (cookie.value || ''));
-			
-			if(cookie.secure)out.push('Secure');
-			
-			if(cookie.http_only)out.push('HttpOnly');
-			
-			if(cookie.same_site)out.push('SameSite=' + cookie.same_site);
-			
-			return out.map(value => value + ';').join(' ');
-		}).join(' ');
+	cookie_encode(value, meta){
+		return nodehttp.construct_cookies(nodehttp.deconstruct_cookies(value, meta).map(cookie => (cookie.name += '@' + (cookie.domain || this.valid_url(meta.url).hostname), cookie.domain = null, cookie)));
 	}
-	deconstruct_cookies(value, data = {}){
-		var cookies = [];
-		
-		value.split(';').forEach(data => {
-			if(data[0] == ' ')data = data.substr(1);
-			
-			var [ name, value ] = data.split('='),
-				lower_name = name.toLowerCase();
-			
-			if(['domain', 'expires', 'path', 'httponly', 'samesite', 'secure', 'max-age'].includes(lower_name)){
-				var cookie = cookies[cookies.length - 1];
-				
-				if(cookie)switch(lower_name){
-					case'expires':
-						
-						cookie.expires = new Date(value);
-						
-						break;
-					case'path':
-						
-						cookie.path = value;
-						
-						break;
-					case'httponly':
-						
-						cookie.http_only = true;
-						
-						break;
-					case'samesite':
-						
-						cookie.same_site = value ? value.toLowerCase() : 'none';
-						
-						break;
-					case'secure':
-						
-						cookie.secure = true;
-						
-						break;
-					case'priority':
-						
-						cookie.priority = value.toLowerCase();
-						
-						break;
-					case'domain':
-						
-						cookie.domain = value;
-						
-						break;
-				}
-			}else{
-				var cookie = { name: name, value: value };
-				
-				cookies.push(cookie);
-			}
-		});
-		
-		return cookies;
-	}
-	/**
-	* Set-cookie processing
-	* @param {String} value - Cookie header
-	* @param {Object} data - Standard object for all rewriter handlers
-	* @param {Object} data.origin - The page location or URL (eg localhost)
-	* @param {Object} data.url - Base URL (needed for hostname when adding suffix)
-	* @returns {Object}
-	*/
-	cookie_encode(value, data = {}){
-		return this.construct_cookies(this.deconstruct_cookies(value, data).map(cookie => (cookie.name += '@' + (cookie.domain || this.valid_url(data.url).hostname), cookie.domain = null, cookie)));
-	}
-	/**
-	* Processes the cookie the client sends and prepares to be sent to a server
-	* @param {String} value - Cookie header
-	* @param {Object} data - Standard object for all rewriter handlers
-	* @param {Object} data.origin - The page location or URL (eg localhost)
-	* @param {Object} data.url - Base URL (needed for hostname when adding suffix)
-	* @returns {Object}
-	*/
-	cookie_decode(value, data = {}){
-		return this.construct_cookies(this.deconstruct_cookies(value).map(cookie => {
+	cookie_decode(value, meta){
+		return nodehttp.construct_cookies(nodehttp.deconstruct_cookies(value).map(cookie => {
 			var target = cookie.name.split('@')[1],
-				host = this.valid_url(data.url).hostname;
+				host = this.valid_url(meta.url).hostname;
 			
 			if(!target || !host)return;
 			
@@ -965,7 +863,7 @@ module.exports = class {
 				fn = split[0].split('@'),
 				origin = fn.splice(-1).join('');
 			
-			return fn && this.valid_url(data.url).hostname.includes(origin) ? fn[0] + '=' + split[1] + ';' : null;
+			return fn && this.valid_url(meta.url).hostname.includes(origin) ? fn[0] + '=' + split[1] + ';' : null;
 		}).filter(v => v).join(' ');
 	}
 	/**
@@ -1057,7 +955,6 @@ module.exports = class {
 				location = global.location,
 				Proxy = global.Proxy,
 				URL = global.URL,
-				importScripts = global.importScripts,
 				defineProperty = Object.defineProperty,
 				defineProperties = Object.defineProperties,
 				getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor,
@@ -1134,7 +1031,7 @@ module.exports = class {
 					return this.js(script, meta(), { inline: true });
 				},
 				rw_eval_prop = data => {
-					return rw_eval(this.constructor.codec.base64.decode(decodeURIComponent(value)));
+					return rw_eval(decodeURIComponent(value));
 				},
 				rw_Response = class extends Response {
 					get url(){
@@ -1144,7 +1041,7 @@ module.exports = class {
 				rw_func = (construct, args) => {
 					var decoy = construct(args),
 						script = args.splice(-1)[0],
-						proxied = construct([ ...args, '(' + this.js('()=>{' + script + '}', meta(), { inline: true }).slice(0, -1) + ')()' ]);
+						proxied = construct([ ...args, '(' + this.js('()=>{' + script + '\n}', meta(), { inline: true }).slice(0, -1) + ')()' ]);
 					
 					defineProperty(proxied, 'length', { get: _ => decoy.length, set: _ => _ });
 					proxied.toString = Function.prototype.toString.bind(decoy);
@@ -1190,34 +1087,108 @@ module.exports = class {
 				}
 			};
 			
-			if(global.History){
-				global.History.prototype.pushState = new Proxy(global.History.prototype.pushState, {
-					apply: (target, that, [ state, title, url = '' ]) => Reflect.apply(target, that, [ state, this.config.title, this.url(url, meta(), { route: 'html' }) ]),
+			if(global.History)global.History.prototype.pushState = new Proxy(global.History.prototype.pushState, {
+				apply: (target, that, [ state, title, url = '' ]) => Reflect.apply(target, that, [ state, this.config.title, this.url(url, meta(), { route: 'html' }) ]),
+			}), global.History.prototype.replaceState = new Proxy(global.History.prototype.replaceState, {
+				apply: (target, that, [ state, title, url = '' ]) => Reflect.apply(target, that, [ state, this.config.title, this.url(url, meta(), { route: 'html' }) ]),
+			});
+			
+			if(global.WebSocket)global.WebSocket = class extends global.WebSocket {
+				constructor(url, proto){
+					super(rewriter.url(new URL(url, location), meta(), { ws: true }), proto);
+					
+					var open;
+					
+					this.addEventListener('open', event => event.stopImmediatePropagation(), { once: true });
+					// first packet is always `open`
+					this.addEventListener('message', event => (event.stopImmediatePropagation(), this.dispatchEvent(new Event('open'))), { once: true });
+				}
+			};
+			
+			/*
+			WebSocket",e=>new l(e,{construct:(e,[t,r])=>{var s=n.construct(e,[this.url(t,m.rw_data({ws:!0})),r]);return s.addEventListener("message",(e=>"srv-alive"==e.data&&e.stopImmediatePropagation()+s.send("srv-alive")||"srv-open"==e.data&&e.stopImmediatePropagation()+s.dispatchEvent(new Event("open",{srcElement:s,target:s})))),s.addEventListener("open",(e=>e.stopImmediatePropagation()),{once:!0}),s}})],["URL","createObjectURL",e=>new l(e,{apply:(e,t,[r])=>{var s=n.apply(e,t,[r]);return i.urls.set(s,i.blob.get(r)),s}})],["URL","revokeObjectURL",e=>new l(e,{apply:(e,t,[r])=>{var s=n.apply(e,t,[r]);return i.urls.delete(r),s}})],["Object","defineProperty",e=>new l(e,{apply:(e,t,[r,s,i])=>n.apply(e,t,[r,s,m.desc(r,s,i)])})]*/
+			
+			// dom context
+			if(global.Node){
+				var getAttribute = Element.prototype.getAttribute,
+					setAttribute = Element.prototype.setAttribute;
+				
+				Element.prototype.getAttribute = new Proxy(Element.prototype.getAttribute, {
+					apply: (target, that, [ attr ]) => {
+						var value = Reflect.apply(target, that, [ attr ]);
+						
+						return this.attr.url[1].includes(attr) ? this.unurl(value, meta()) : this.attr.css[1].includes(attr) ? this.uncss(value, meta()) : attr.startsWith('on') ? this.unjs(value, meta()) : value;
+					},
 				});
 				
-				global.History.prototype.replaceState = new Proxy(global.History.prototype.replaceState, {
-					apply: (target, that, [ state, title, url = '' ]) => Reflect.apply(target, that, [ state, this.config.title, this.url(url, meta(), { route: 'html' }) ]),
+				Element.prototype.setAttribute = new Proxy(Element.prototype.setAttribute, {
+					apply: (target, that, [ attr, value ]) => {
+						var data = this.attribute(that, attr, value, meta());
+						
+						if(data.preserve_source)setAttribute.call(that, data.name + '-rw', data.value);
+						
+						return this.attr.url[1].includes(attr) ? this.unurl(value, meta()) : this.attr.css[1].includes(attr) ? this.uncss(value, meta()) : attr.startsWith('on') ? this.unjs(value, meta()) : value;
+					},
 				});
+				
+				this.attr.inherits_url.forEach(prop => {
+					var proto = getPrototypeOf(global[prop]),
+						descs = getOwnPropertyDescriptors(proto);
+					
+					this.attr.url[1].forEach(attr => descs[attr] && defineProperty(proto, attr, {
+						get(){
+							return rewriter.unurl(Reflect.apply(descs[attr].get, this, []), meta());
+						},
+						set(value){
+							var data = rewriter.attribute(node, prop, value, meta()),
+								set = value => Reflect.apply(descs[attr].set, this, [ value ]);
+							
+							if(data.preserve_source)setAttribute.call(this, data.name + '-rw', data.value);
+							
+							if(!data.modified)return set(value);
+							if(data.deleted)return this.removeAttribute(attr);
+						},
+					}));
+					
+					this.attr.del[1].forEach((attr, set_val) => (set_val = new Map()) && proto[attr] && defineProperty(proto, attr, {
+						get(){
+							return set_val.has(this) ? set_val.get(this) : (set_val.set(this, getAttribute.call(this, attr)), set_val.get(this))
+						},
+						set(value){
+							return set_val.set(this, value);
+						},
+					}));
+				});
+				
+				['origin', 'protocol', 'username', 'password', 'host', 'hostname', 'port', 'pathname', 'search', 'hash'].forEach(name => defineProperty(HTMLAnchorElement.prototype, name, {
+					get(){
+						return getAttribute.call(this, name + '-rw');
+					},
+					set(value){
+						var curr = new URL(this.href);
+						
+						curr[name] = value;
+						
+						this.href = curr;
+						
+						return value;
+					},
+				}));
+				
+				delete global.navigator.getUserMedia;
+				delete global.navigator.mozGetUserMedia;
+				delete global.navigator.webkitGetUserMedia;
+				delete global.MediaStreamTrack;
+				delete global.mozMediaStreamTrack;
+				delete global.webkitMediaStreamTrack;
+				delete global.RTCPeerConnection;
+				delete global.mozRTCPeerConnection;
+				delete global.webkitRTCPeerConnection;
+				delete global.RTCSessionDescription;
+				delete global.mozRTCSessionDescription;
+				delete global.webkitRTCSessionDescription;
 			}
 		}
-	}
-	/**
-	* Serializes a JSDOM or DOMParser object
-	* @param {Document} DOM
-	* @returns {String}
-	*/
-	html_serial(dom){
-		if(module.browser)return dom.querySelector('#pro-root').innerHTML;
-		
-		var out, odoc = this.dom.window._document;
-		
-		this.dom.window._document = dom;
-		
-		out = this.dom.serialize();
-		
-		this.dom.window._document = odoc;
-		
-		return out;
 	}
 	/**
 	* Wraps a string

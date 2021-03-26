@@ -141,10 +141,8 @@ var rewriter = require('./index.js'),
 
 var org_a = Object.getOwnPropertyDescriptors(HTMLAnchorElement.prototype);
 
-["origin", "protocol", "username", "password", "host", "hostname", "port", "pathname", "search", "hash"].forEach(name => Reflect.defineProperty(HTMLAnchorElement.prototype, name, {
+['origin', 'protocol', 'username', 'password', 'host', 'hostname', 'port', 'pathname', 'search', 'hash'].forEach(name => Reflect.defineProperty(HTMLAnchorElement.prototype, name, {
 	get(){
-		// console.log(name, new URL(this.href)[name], this.href);
-		
 		return this.href ? new URL(this.href)[name] : this.href;
 	},
 	set(v){

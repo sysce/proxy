@@ -1,5 +1,3 @@
-node_modules/
-node_modules/*
 package-lock.json
-data/
-data/*
+data.db
+node_modules
