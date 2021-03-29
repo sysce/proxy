@@ -2,7 +2,7 @@
 	"name": "sys-proxy",
 	"description": "woah",
 	"version": "1.0.4",
-	"main": "index.js",
+	"main": "server.js",
 	"repository": {
 		"type": "git",
 		"url": "git+https://github.com/sysce/proxy.git"
@@ -28,8 +28,12 @@
 	"author": "systemya",
 	"license": "GPL-3.0",
 	"dependencies": {
+		"acorn-hammerhead": "^0.4.0",
+		"esotope-hammerhead": "^0.6.1",
 		"parse5": "^6.0.1",
 		"sqlite3": "^5.0.2",
-		"sys-nodehttp": "^1.5.3"
+		"sys-nodehttp": "^1.5.7",
+		"webpack": "^5.28.0",
+		"ws": "^7.4.4"
 	}
 }
