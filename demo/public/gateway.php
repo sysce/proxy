@@ -10,7 +10,7 @@ else{
 	url = is_url(url) ? add_proto(url) : 'https://www.google.com/search?q=' + encodeURIComponent(url);
 	
 	// todo: add cookie auth
-	res.cookies.gateway = { value: 'sp', samesite: 'lax' };
+	res.headers.append('set-cookie', 'gateway=sp; samesite=lax; path=/');
 	
 	return res.redirect(rw.url(url, { origin: req.url.origin, base: 'about:' }, { route: 'html' }));
 }
