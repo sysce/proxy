@@ -9,7 +9,7 @@ var fs = require('fs'),
 	crypto = require('crypto'),
 	webpack = require('webpack'),
 	webpack = require('webpack'),
-	nodehttp = require('sys-nodehttp'),
+	nodehttp = require('../nodehttp'),
 	WebSocket = require('ws'),
 	sqlite3 = class extends require('sqlite3').Database {
 		constructor(...args){
@@ -73,36 +73,66 @@ module.exports = class extends require('./index.js') {
 		if(this.config.server){
 			this.webpack = webpack({
 				entry: path.join(__dirname, 'browser.js'),
-				output: { filename: '1' },
-			}, (err, stats) => {
-				if(err)return console.error(err);
-				
-				this.webpack.outputFileSystem = {
-					mkdir: fs.mkdir,
-					writeFile: (path, data, cb) => {
-						this.bundle_ts = Date.now();
-						
-						this.bundle = data.toString().replace(/\$inject_(\w+)\$/g, (match, prop) => JSON.stringify(prop == 'config' ? {
+				output: { path: path.join(__dirname, 'bundle'), filename: 'main.js' },
+				devtool: 'source-map',
+				plugins: [
+					/*new webpack.SourceMapDevToolPlugin({
+						filename: '[file].map',
+					}),*/
+					new webpack.DefinePlugin({
+						PRODUCTION: true,
+						inject_bundle_ts: this.bundle_ts,
+						inject_config: JSON.stringify({
 							codec: this.config.codec.name,
 							prefix: this.config.prefix,
 							title: this.config.title,
 							ws: this.config.ws,
-						} : this[prop])).replace(/(\/\*{6}\/ \()(\(\) => {)/, '$1this.rw_bundle=$2');
-						
-						cb();
-					},
-				};
+						}),
+					}),
+				],
+			}, (err, stats) => {
+				if(err)return console.error(err);
 				
 				this.webpack.watch({}, (err, stats) => {
 					if(err)return console.error(err);
-					
-					console.log('bundled');
+					this.bundle_ts = Date.now();
+					console.log('Frontend bundled');
 				});
 			});
 			
-			this.config.server.use(this.config.prefix + '*', async (req, res) => {
-				if(req.url.searchParams.has('bundle'))return res.contentType('application/javascript').send(this.bundle);
+			this.config.server.use(this.config.prefix + '/', nodehttp.static(this.webpack.options.output.path, { listing: [ '/' ] }));
+			
+			this.config.server.use(this.config.prefix, async (req, res) => {
 				if(req.url.searchParams.has('favicon'))return res.contentType('image/png').send(Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAA', 'base64'));
+				if(req.url.searchParams.has('cookie') && req.method == 'POST'){
+					var meta = { id: req.cookies.proxy_id, url: this.valid_url(req.body.url) };
+					
+					if(!meta.url || !req.body.value)return res.cgi_error(400, 'Invalid body');
+					
+					if(!meta.id)res.headers.append('set-cookie', 'proxy_id=' + (meta.id = await this.bytes()) + '; expires=' + new Date(Date.now() + 54e8).toGMTString());
+					
+					await data.run(`create table if not exists "${meta.id}" (
+						domain text primary key not null,
+						value text,
+						access integer not null
+					)`);
+					
+					var existing = await data.run(`select * from "${meta.id}" where domain = ? or domain = ?`, meta.url.host, '.' + meta.url.host);
+					
+					existing = existing ? JSON.parse(existing.value) : {};
+					
+					nodehttp.cookies.parse(req.body.value).forEach(cookie => {
+						var name = cookie.name;
+						
+						delete cookie.name;
+						
+						existing[name] = cookie;
+					});
+					
+					await data.run(`insert or replace into "${meta.id}" (domain,value,access) values (?, ?, ?)`, meta.url.host, JSON.stringify(existing), Date.now());
+					
+					return res.status(200).end();
+				}
 				
 				var url = this.valid_url(this.unurl(req.url.href, this.empty_meta)),
 					meta = { url: url, origin: req.url.origin, base: url.origin, id: req.cookies.proxy_id },
@@ -190,8 +220,6 @@ module.exports = class extends require('./index.js') {
 					url = this.unurl(req_url.href, this.empty_meta),
 					cookies = nodehttp.cookies.parse_object(req.headers.cookie),
 					meta = { url: url, origin: req_url, base: url, id: cookies.id };
-				
-				console.log(req_url);
 				
 				if(!url)return cli.close();
 				

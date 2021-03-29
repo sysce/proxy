@@ -1,8 +1,11 @@
-'use strict';
 var parse5 = require('parse5'),
 	acorn = require('acorn-hammerhead'),
 	esotope = require('esotope-hammerhead'),
-	browser = typeof window != 'undefined';
+	cookies = require('sys-nodehttp/cookies'),
+	browser = typeof window != 'undefined',
+	rw_bundle = browser && this && arguments.callee.caller.caller;
+
+'use strict';
 
 module.exports = class {
 	constructor(config){
@@ -185,21 +188,18 @@ module.exports = class {
 		
 		out.forEach(callback);
 	}
-	walk_est(tree, callback){
-		var iterate = (obj, out = []) => {
-				for(var prop in obj)if(typeof obj[prop] == 'object' && obj[prop] != null){
-					if(!Array.isArray(obj[prop]) && obj[prop].type)out.push([ obj, prop ]);
-					
-					obj[prop].contains = node => iterate(obj[prop]).includes(node);
-					
-					iterate(obj[prop], out);
-					
-					return out;
-				}
-			},
-			cb_func = typeof callback == 'function';
+	iterate_est(obj, arr = []){
+		for(var prop in obj)if(typeof obj[prop] == 'object' && obj[prop] != null){
+			// is a node, not array of nodes
+			if(!Array.isArray(obj[prop]) && obj[prop].type)arr.push([ obj, prop ]);
+			
+			this.iterate_est(obj[prop], arr);
+		}
 		
-		return callback ? iterate(tree).forEach(([ obj, prop ], cb) => (cb = cb_func ? callback : (!callback.condition || callback.condition.call(callback, obj[prop], obj, prop)) && callback[obj[prop].type]) && cb.call(callback, obj[prop], obj, prop)) : iterate(tree);
+		return arr;
+	}
+	walk_est(tree, callback){
+		return this.iterate_est(tree).forEach(([ obj, prop ], ind, arr) => callback(obj[prop], obj, prop, arr));
 	}
 	js(value, meta, options = {}){
 		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
@@ -241,57 +241,70 @@ module.exports = class {
 			clean_rw_arg = node => node.type == 'Identifier' ? { type: 'Literal', value: node.name } : node,
 			asm_bodies = [];
 		
-		this.walk_est(tree, {
-			condition: node => !asm_bodies.some(n => n.contains(node)),
-			CallExpression(node){
-				if(node.callee.name == 'eval')node.arguments = [{
-					type: 'CallExpression',
-					callee: { type: 'Identifier', name: '$rw_eval' },
-					arguments: node.arguments,
-				}];
-				// else if(is_getter(node.callee) && (!node.object || node.object.type != 'CallExpression'))node.callee = rw_getter(node.callee);
-			},
-			ExpressionStatement(node, parent, index){
-				if(node.directive == 'use asm')return console.log(parent), asm_bodies.push(parent);
-				if(is_getter(node.expression))node.expression = rw_getter(node.expression);
-			},
-			ImportExpression(node){
-				node.source = {
-					type: 'CallExpression',
-					callee: { type: 'Identifier', name: '$rw_url' },
-					arguments: [ node.source ],
-				};
-			},
-			ImportDeclaration: node => {
-				node.source.raw = JSON.stringify(this.url(node.source.value, meta, { route: 'js' }));
-			},
-			AssignmentExpression(node, parent, index){
-				// note: "why is node.left.type == 'MemberExpression' && " here? thought it is checked in exact
-				if(node.left.type == 'MemberExpression' && !exact(node.left.property))parent[index] = {
-					type: 'AssignmentExpression',
-					operator: node.operator,
-					left: {
-						type: 'MemberExpression',
-						object: rw_setter(node.left),
-						property: { type: 'Identifier', name: 'val' },
-					},
-					right: node.right,
-				};
-			},
-			UpdateExpression(node, parent, index){
-				if(!exact(node.argument))node.argument = rw_setter(node.argument);
-			},
-			MemberExpression(node, parent, index){
-				if(!exact(node.property))parent[index] = {
-					type: 'CallExpression',
-					callee: { type: 'Identifier', name: '$rw_get' },
-					arguments: [ node.object, clean_rw_arg(node.property) ],
-				};
-				else if(is_getter(node.object))node.object = rw_getter(node.object);
-			},
+		this.walk_est(tree, (node, parent, index, nodes) => {
+			var contains = node => this.iterate_est(parent[index], []).includes(node),
+				replace = node => parent[index] = node;
+			
+			switch(node.type){
+				case'CallExpression':
+					
+					if(node.callee.name == 'eval')node.arguments = [{
+						type: 'CallExpression',
+						callee: { type: 'Identifier', name: '$rw_eval' },
+						arguments: node.arguments,
+					}];
+					
+					break;
+				case'ExpressionStatement':
+					
+					if(node.directive == 'use asm')asm_bodies.push(parent);
+					else if(is_getter(node.expression))node.expression = rw_getter(node.expression);
+					
+					break;
+				case'ImportExpression':
+					
+					node.source = {
+						type: 'CallExpression',
+						callee: { type: 'Identifier', name: '$rw_url' },
+						arguments: [ node.source ],
+					};
+					
+					break;
+				case'ImportDeclaration':
+					
+					node.source.raw = JSON.stringify(this.url(node.source.value, meta, { route: 'js' }));
+					
+					break;
+				case'AssignmentExpression':
+					
+					// note: "why is node.left.type == 'MemberExpression' && " here? thought it is checked in exact
+					if(node.left.type == 'MemberExpression' && !exact(node.left.property))node = replace({
+						type: 'AssignmentExpression',
+						operator: node.operator,
+						left: {
+							type: 'MemberExpression',
+							object: rw_setter(node.left),
+							property: { type: 'Identifier', name: 'val' },
+						},
+						right: node.right,
+					});
+					
+					break;
+				case'UpdateExpression':
+					
+					if(!exact(node.argument))node.argument = rw_setter(node.argument);
+					
+					break;
+				case'MemberExpression':
+					
+					if(!exact(node.property))replace(rw_getter(node));
+					else if(is_getter(node.object))node.object = rw_getter(node.object);
+					
+					break;
+			}
 		});
 		
-	return (options.inline ? '' : '/*$rw_vars*/(typeof importScripts=="function"&&/\\[native code]\\s+}$/.test(importScripts)&&importScripts(location.origin+' + JSON.stringify(this.config.prefix) + '+"?bundle=' + this.bundle_ts + '"));/*$rw_vars*/\n') + esotope.generate(tree);
+		return (options.inline ? '' : '/*$rw_vars*/(typeof importScripts=="function"&&/\\[native code]\\s+}$/.test(importScripts)&&importScripts(location.origin+' + JSON.stringify(this.config.prefix) + '+' + JSON.stringify(this.config.prefix + '/main.js?ts=' + this.bundle_ts) + '));/*$rw_vars*/\n') + esotope.generate(tree);
 	}
 	css(value, meta){
 		if(!value)return value;
@@ -375,7 +388,13 @@ module.exports = class {
 					if(node.attrs){
 						var href = node.attrs.find(attr => attr.name == 'href');
 						
-						if(href)meta.base = href.value;
+						if(href){
+							var valid = this.valid_url(href.value, meta.base);
+							
+							if(valid)meta.base = valid.href;
+						}
+						
+						node.deleted = true;
 					}
 					
 					break;
@@ -413,7 +432,7 @@ module.exports = class {
 			{ nodeName: 'link', tagName: 'link', attrs: [ { name: 'type', value: 'image/x-icon' }, { name: 'rel', value: 'shortcut icon' }, { name: 'href', value: '?favicon' },  inject_attr ] },
 			{ nodeName: 'title', tagName: 'title', childNodes: [ { nodeName: '#text', value: this.config.title } ], attrs: [  inject_attr ] },
 			{ nodeName: 'meta', tagName: 'meta', attrs: [ { name: 'name', value: 'robots' }, { name: 'content', value: 'noindex,nofollow' }, inject_attr ] },
-			{ nodeName: 'script', tagName: 'script', attrs: [ { name: 'src', value: '?bundle=' + this.bundle_ts }, inject_attr ] },
+			{ nodeName: 'script', tagName: 'script', attrs: [ { name: 'src', value: this.config.prefix + '/main.js?ts=' + this.bundle_ts }, inject_attr ] },
 		];
 	}
 	async html_async(value, meta, options = {}){
@@ -481,7 +500,7 @@ module.exports = class {
 		else if(/^on[a-zA-Z]+$/.test(data.name))return 'js';
 		else return (this.attr_ent.find(x => (x[1][0] == '*' || x[1][0].includes(data.tag)) && x[1][1].includes(data.name))||[])[0]
 	}
-	attribute(node, name, value, meta){
+	attribute(node, name, value, meta, do_modify = true){
 		var data = {
 			attrs: typeof global.Node == 'function' && node instanceof global.Node ? node.getAttributeNames().map(name => ({ name: name, value: node.getAttribute(value) })) : node.attrs || [],
 			modified: false,
@@ -513,7 +532,7 @@ module.exports = class {
 		
 		if(data.name == 'rel' && data.tag == 'link' && data.href)data.modify.push([ { name:	'href', value: this.url(this.unurl(data.href.value), meta, { route: this.attribute_route(Object.assign({}, data, { name: 'href' })) }) } ]);*/
 		
-		switch(data.type){
+		if(do_modify)switch(data.type){
 			case'url':
 				
 				data.value = data.name == 'srcset' ?
@@ -597,8 +616,7 @@ module.exports = class {
 		return out;
 	}
 	hook_frame(node){
-		console.log(node);
-		if(!node.src)new node.contentWindow.Function('(' + global.rw_bundle + ')()')();
+		if(!node.src)node.contentWindow.rw_bundle = rw_bundle, new node.contentWindow.Function('(' + rw_bundle + ')()')();
 	}
 	exec_globals(){
 		if(typeof $rw_get == 'undefined'){
@@ -617,6 +635,7 @@ module.exports = class {
 				getPrototypeOf = Object.getPrototypeOf,
 				setPrototypeOf = Object.setPrototypeOf,
 				hasOwnProperty = Object.hasOwnProperty,
+				fetch = global.fetch,
 				keys = Object.keys,
 				meta = () => ({
 					origin: location.origin,
@@ -655,7 +674,7 @@ module.exports = class {
 					return location;
 				},
 				rw_proxy = object => {
-					var proto = typeof object == 'object' && getPrototypeOf(object);
+					var proto = object != null && typeof object == 'object' && getPrototypeOf(object);
 					
 					if(proto && ['[object Location]', '[object WorkerLocation]'].includes(toString(proto)))return wrapped_locations.get(object) || wrapped_location(object);
 					return object;
@@ -805,9 +824,13 @@ module.exports = class {
 				global.Element.prototype.getAttribute = new Proxy(global.Element.prototype.getAttribute, {
 					apply: (target, that, [ attr ]) => {
 						var value = Reflect.apply(target, that, [ attr ]),
-							type = this.attribute_type(attr);
+							data = this.attribute({ // get precise type info without modifying
+								tagName: that.tagName,
+								getAttribute: getAttribute.bind(that),
+								getAttributeNames: that.getAttributeNames.bind(that),
+							}, attr, value, meta(), false);
 						
-						return value && type && this['un' + type] ? this['un' + type](value, meta()) : value;
+						return data.value && this['un' + data.type] ? this['un' + data.type](data.value, meta()) : value;
 					},
 				});
 				
@@ -874,14 +897,33 @@ module.exports = class {
 				var titles = new Map(),
 					title = getOwnPropertyDescriptor(global.Document.prototype, 'title').get;
 				
-				defineProperty(global.Document.prototype, 'title', {
-					get(){
-						if(!titles.has(this))titles.set(this, title.call(this));
-						
-						return titles.get(this);
+				defineProperties(global.Document.prototype, {
+					title: {
+						get(){
+							if(!titles.has(this))titles.set(this, title.call(this));
+							
+							return titles.get(this);
+						},
+						set(value){
+							return titles.set(this, value);
+						},
 					},
-					set(value){
-						return titles.set(this, value);
+					cookie: {
+						get(){
+							return '';
+						},
+						set: value => {
+							fetch(this.config.prefix + '?cookie', {
+								headers: {
+									'content-type': 'application/json',
+								},
+								method: 'POST',
+								body: JSON.stringify({
+									url: location.href,
+									value: value,
+								}),
+							});
+						},
 					},
 				});
 				
