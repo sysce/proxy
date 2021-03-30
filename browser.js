@@ -1,7 +1,7 @@
 var rw_bundle = this && arguments.callee.caller.caller,
-	cookies = require('sys-nodehttp/cookies');
-
-var _rewriter = class extends require('./index.js') {
+	cookies = require('sys-nodehttp/cookies'),
+	_rewriter = class extends require('./index.js') {
+	
 	hook_frame(node){
 		if(!node.src)node.contentWindow.rw_bundle = rw_bundle, new node.contentWindow.Function('(' + rw_bundle + ')()')();
 	}
@@ -220,6 +220,8 @@ var _rewriter = class extends require('./index.js') {
 				}
 			};
 			
+			var get_sandbox_host = () => new URL(meta().base).hostname;
+			
 			if(global.Storage){
 				var sync = Symbol(),
 					get_item = global.Storage.prototype.getItem,
@@ -227,7 +229,6 @@ var _rewriter = class extends require('./index.js') {
 					sync_sandbox = function(obj = this){
 						set_item.call(storage, get_sandbox_host(), obj);
 					},
-					get_sandbox_host = () => new URL(meta().base).hostname,
 					get_sandbox = storage => {
 						var sandbox = setPrototypeOf(JSON.parse(get_item.call(storage, get_sandbox_host()) || '{}'), null);
 						
@@ -288,6 +289,21 @@ var _rewriter = class extends require('./index.js') {
 				} ]))));
 			}
 			
+			if(global.IDBFactory){
+				global.IDBFactory.prototype.open = new Proxy(global.IDBFactory.prototype.open, {
+					apply: (target, that, [ name, version ]) => Reflect.apply(target, that, [ name + '@' + get_sandbox_host(), version ]),
+				});
+				
+				var idb_name = Object.getOwnPropertyDescriptor(global.IDBDatabase.prototype, 'name');
+				
+				Object.defineProperty(global.IDBDatabase.prototype, 'name', {
+					get(){
+						var name = idb_name.call(this);
+						
+						return name.split('@').split('@').slice(0, -1).join('@');
+					},
+				});
+			}
 			// dom context
 			if(global.Node){
 				var getAttribute = global.Element.prototype.getAttribute,
@@ -484,8 +500,4 @@ var _rewriter = class extends require('./index.js') {
 	}
 };
 
-var rewriter = new _rewriter(inject_config);
-
-rewriter.bundle_ts = inject_bundle_ts;
-
-rewriter.exec_globals();
+new _rewriter(inject_config).exec_globals();
