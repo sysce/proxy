@@ -43,7 +43,6 @@ var fs = require('fs'),
 					
 					time = Date.now() - start;
 					
-					// console.log(this.wqueue.length + ' - ' + time + ' MS - ' + args[0]);
 					if(time > 100)console.log(query + '\ntook ' + time + 'ms to execute, consider optimizing');
 				}));
 			
@@ -65,7 +64,7 @@ var fs = require('fs'),
 
 module.exports = class extends require('./index.js') {
 	constructor(config){
-		super(Object.assign({
+		var rewriter = super(Object.assign({
 			http_agent: null,
 			https_agent: new https.Agent({ rejectUnauthorized: false }),
 		}, config));
@@ -76,12 +75,8 @@ module.exports = class extends require('./index.js') {
 				output: { path: path.join(__dirname, 'bundle'), filename: 'main.js' },
 				devtool: 'source-map',
 				plugins: [
-					/*new webpack.SourceMapDevToolPlugin({
-						filename: '[file].map',
-					}),*/
 					new webpack.DefinePlugin({
 						PRODUCTION: true,
-						inject_bundle_ts: this.bundle_ts,
 						inject_config: JSON.stringify({
 							codec: this.config.codec.name,
 							prefix: this.config.prefix,
@@ -94,61 +89,75 @@ module.exports = class extends require('./index.js') {
 				if(err)return console.error(err);
 				
 				this.webpack.watch({}, (err, stats) => {
-					if(err)return console.error(err);
-					this.bundle_ts = Date.now();
-					console.log('Frontend bundled');
+					var error = !!(err || stats.compilation.errors.length);
+					
+					for(var ind = 0; ind < stats.compilation.errors.length; ind++)error = true, console.error(stats.compilation.errors[ind]);
+					if(err)console.error(err);
+					
+					if(error)return console.error('One or more errors occured during bundling, refer to above console output for more info');
+					
+					console.log('Bundling success');
 				});
+			});
+			
+			this.config.server.use(this.config.prefix, async (req, res, next) => {
+				req.meta_id = req.cookies.proxy_id;
+				
+				if(!req.meta_id)res.headers.append('set-cookie', 'proxy_id=' + (req.meta_id = await this.bytes()) + '; expires=' + new Date(Date.now() + 54e8).toGMTString());
+				
+				next();
+			});
+			
+			this.config.server.post(this.config.prefix + '/cookie', async (req, res) => {
+				var meta = { id: req.meta_id, url: this.valid_url(req.body.url) };
+				
+				// only works if table exists
+				if(!meta.id || !(await data.run(`select * from "${meta.id}";`).then(() => true).catch(err => false)) || !meta.url || !req.body.value)return res.error(400, 'Invalid body');
+				
+				var parsed = nodehttp.cookies.parse_object(req.body.value, true);
+				
+				for(var name in parsed){
+					var cookie = parsed[name],
+						domain = cookie.domain || meta.url.host,
+						got = await data.get(`select * from "${meta.id}" where domain = ?`, domain),
+						existing = got ? nodehttp.cookies.parse_object(got.value, true) : {};
+					
+					existing[name] = cookie;
+					
+					delete existing[name].name;
+					
+					await data.run(`insert or replace into "${meta.id}" (domain,value,access) values (?, ?, ?)`, got ? got.domain : domain, nodehttp.cookies.format_object(existing).join(' '), Date.now());
+				}
+				
+				return res.status(200).end();
+			});
+			
+			this.config.server.get(this.config.prefix + '/favicon', async (req, res) => {
+				res.contentType('image/png').send(Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAA', 'base64'));
 			});
 			
 			this.config.server.use(this.config.prefix + '/', nodehttp.static(this.webpack.options.output.path, { listing: [ '/' ] }));
 			
-			this.config.server.use(this.config.prefix, async (req, res) => {
-				if(req.url.searchParams.has('favicon'))return res.contentType('image/png').send(Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAA', 'base64'));
-				if(req.url.searchParams.has('cookie') && req.method == 'POST'){
-					var meta = { id: req.cookies.proxy_id, url: this.valid_url(req.body.url) };
-					
-					if(!meta.url || !req.body.value)return res.cgi_error(400, 'Invalid body');
-					
-					if(!meta.id)res.headers.append('set-cookie', 'proxy_id=' + (meta.id = await this.bytes()) + '; expires=' + new Date(Date.now() + 54e8).toGMTString());
-					
-					await data.run(`create table if not exists "${meta.id}" (
-						domain text primary key not null,
-						value text,
-						access integer not null
-					)`);
-					
-					var existing = await data.run(`select * from "${meta.id}" where domain = ? or domain = ?`, meta.url.host, '.' + meta.url.host);
-					
-					existing = existing ? JSON.parse(existing.value) : {};
-					
-					nodehttp.cookies.parse(req.body.value).forEach(cookie => {
-						var name = cookie.name;
-						
-						delete cookie.name;
-						
-						existing[name] = cookie;
-					});
-					
-					await data.run(`insert or replace into "${meta.id}" (domain,value,access) values (?, ?, ?)`, meta.url.host, JSON.stringify(existing), Date.now());
-					
-					return res.status(200).end();
-				}
-				
+			this.config.server.all(this.config.prefix + '*', async (req, res) => {
 				var url = this.valid_url(this.unurl(req.url.href, this.empty_meta)),
-					meta = { url: url, origin: req.url.origin, base: url.origin, id: req.cookies.proxy_id },
+					meta = { url: url, origin: req.url.origin, base: url.origin, id: req.meta_id },
 					failure,
-					timeout = setTimeout(() => !res.body_sent && (failure = true, res.cgi_error(500, 'Timeout')), this.config.timeout);
-				
-				// random secure id, expires after 2 months (54e8)+
-				if(!meta.id)res.headers.append('set-cookie', 'proxy_id=' + (meta.id = await this.bytes()) + '; expires=' + new Date(Date.now() + 54e8).toGMTString());
+					timeout = setTimeout(() => !res.body_sent && (failure = true, res.error(500, 'Timeout')), this.config.timeout);
 				
 				if(!url || !this.protocols.includes(url.protocol))return res.redirect('/');
 				
-				var ip = await dns.promises.lookup(url.hostname).catch(err => (failure = true, res.cgi_error(400, error)));
+				var ip = await dns.promises.lookup(url.hostname).catch(err => (failure = true, res.error(400, err)));
 				
 				if(failure)return;
 				
-				if(ip.address.match(this.regex.url.ip))return res.cgi_error(403, 'Forbidden IP');
+				if(ip.address.match(this.regex.url.ip))return res.error(403, 'Forbidden IP');
+				
+				await data.run(`create table if not exists "${meta.id}" (
+					domain text primary key not null,
+					value text,
+					access integer not null
+				)`);
+
 				
 				(url.protocol == 'http:' ? http : https).request({
 					agent: url.protocol == 'http:' ? this.config.http_agent : this.config.https_agent,
@@ -207,7 +216,7 @@ module.exports = class extends require('./index.js') {
 					
 					if(failure || res.body_sent || res.head_sent)return;
 					
-					res.cgi_error(400, err);
+					res.error(400, err);
 				}).end(req.raw_body);
 			});
 		}
@@ -219,7 +228,7 @@ module.exports = class extends require('./index.js') {
 				var req_url = new this.URL(req.url, new this.URL('wss://' + req.headers.host)),
 					url = this.unurl(req_url.href, this.empty_meta),
 					cookies = nodehttp.cookies.parse_object(req.headers.cookie),
-					meta = { url: url, origin: req_url, base: url, id: cookies.id };
+					meta = { url: url, origin: req_url, base: url, id: cookies.proxy_id };
 				
 				if(!url)return cli.close();
 				
@@ -258,14 +267,9 @@ module.exports = class extends require('./index.js') {
 		
 		// meta.id is hex, has no quotes so it can be wrapped in ""
 		var out = {},
-			existing = meta.id && await data.get(`select * from "${meta.id}" where domain = ? or domain = ?`, meta.url.host, '.' + meta.url.host).catch(err => {
-				console.error(err);
-				
-				return false;
-			}),
-			cookies;
+			existing = meta.id && await data.all(`select * from "${meta.id}" where domain = ?1 or ?1 like ('%' || domain)`, [ meta.url.host ]).catch(err => (console.error(err), []));
 		
-		out.cookie = nodehttp.cookies.format(Object.entries(existing ? JSON.parse(existing.value) : {}).map(([ key, val ]) => ({ name: key, value: val.value })));
+		out.cookie = existing.map(data => data.value).join(' ');
 		
 		value.forEach((value, header) => {
 			// val = typeof value[header] == 'object' ? value[header].join('') : value[header];
@@ -303,7 +307,7 @@ module.exports = class extends require('./index.js') {
 			}
 		});
 		
-		out['accept-encoding'] = 'gzip, deflate'; // , br
+		out['accept-encoding'] = 'gzip, deflate, br';
 		
 		out.host = new this.URL(meta.url).host;
 		
@@ -320,25 +324,20 @@ module.exports = class extends require('./index.js') {
 				case'set-cookie':
 					
 					for(var ind = 0; ind < arr.length; ind++){
-						await data.run(`create table if not exists "${meta.id}" (
-							domain text primary key not null,
-							value text,
-							access integer not null
-						)`);
+						var parsed = nodehttp.cookies.parse_object(val, true);
 						
-						var existing = await data.run(`select * from "${meta.id}" where domain = ? or domain = ?`, meta.url.host, '.' + meta.url.host);
-						
-						existing = existing ? JSON.parse(existing.value) : {};
-						
-						nodehttp.cookies.parse(arr[ind]).forEach(cookie => {
-							var name = cookie.name;
+						for(var name in parsed){
+							var cookie = parsed[name],
+								domain = cookie.domain || meta.url.host,
+								got = await data.get(`select * from "${meta.id}" where domain = ?`),
+								existing = got ? nodehttp.cookies.format_object(got.value, true) : {};
 							
-							delete cookie.name;
+							existing[name] = Object.assign({}, cookie);
 							
-							existing[name] = cookie;
-						});
-						
-						await data.run(`insert or replace into "${meta.id}" (domain,value,access) values (?, ?, ?)`, meta.url.host, JSON.stringify(existing), Date.now());
+							delete existing[name].name;
+							
+							await data.run(`insert or replace into "${meta.id}" (domain,value,access) values (?, ?, ?)`, got ? got.domain : domain, nodehttp.cookies.format_object(existing), Date.now());
+						};
 					};
 					
 					break;
@@ -357,12 +356,13 @@ module.exports = class extends require('./index.js') {
 		
 		return out;
 	}
-decompress(req, res){
+	decompress(req, res){
 		var chunks = [];
 		
 		return new Promise((resolve, reject) => {
 			if(req.method != 'HEAD' && res.statusCode != 204  && res.statusCode != 304)switch(res.headers['content-encoding'] || res.headers['x-content-encoding']){
 				case'gzip':
+					
 					res = res.pipe(zlib.createGunzip({
 						flush: zlib.Z_SYNC_FLUSH,
 						finishFlush: zlib.Z_SYNC_FLUSH
@@ -376,10 +376,8 @@ decompress(req, res){
 					
 					break;
 				case'br':
-					res = res.pipe(zlib.createBrotliDecompress({
-						flush: zlib.Z_SYNC_FLUSH,
-						finishFlush: zlib.Z_SYNC_FLUSH
-					}));
+					
+					res = res.pipe(zlib.createBrotliDecompress());
 					
 					break;
 			}

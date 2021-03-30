@@ -28,11 +28,12 @@
 	"author": "systemya",
 	"license": "GPL-3.0",
 	"dependencies": {
+		"acorn": "^8.1.0",
 		"acorn-hammerhead": "^0.4.0",
 		"esotope-hammerhead": "^0.6.1",
 		"parse5": "^6.0.1",
 		"sqlite3": "^5.0.2",
-		"sys-nodehttp": "^1.5.9",
+		"sys-nodehttp": "^1.6.0",
 		"webpack": "^5.28.0",
 		"ws": "^7.4.4"
 	}

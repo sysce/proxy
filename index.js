@@ -1,9 +1,6 @@
 var parse5 = require('parse5'),
 	acorn = require('acorn-hammerhead'),
-	esotope = require('esotope-hammerhead'),
-	cookies = require('sys-nodehttp/cookies'),
-	browser = typeof window != 'undefined',
-	rw_bundle = browser && this && arguments.callee.caller.caller;
+	esotope = require('esotope-hammerhead');
 
 'use strict';
 
@@ -213,7 +210,7 @@ module.exports = class {
 		try{
 			tree = acorn.parse(value, {
 				allowImportExportEverywhere: true,
-				ecmaVersion: 2020,
+				ecmaVersion: 2021,
 			})
 		}catch(err){
 			console.error(err);
@@ -224,14 +221,15 @@ module.exports = class {
 		var is_getter = node => node.name == 'location' || node.value == 'location',
 			// checks if expression can be predicted
 			exact = node => [ 'Literal', 'Identifier', 'MemberExpression', 'Super' ].includes(node.type) && !is_getter(node),
-			rw_getter = node => node.object ? {
+			bound_get = node => node.type == 'CallExpression' ? { type: 'Literal', value: true, raw: true } : { type: 'Literal', value: false, raw: false },
+			rw_getter = (node, parent) => node.object ? {
 				type: 'CallExpression',
 				callee: { type: 'Identifier', name: '$rw_get' },
-				arguments: [ node.object, clean_rw_arg(node.property), ],
+				arguments: [ node.object, clean_rw_arg(node.property), bound_get(parent) ],
 			} : {
 				type: 'CallExpression',
 				callee: { type: 'Identifier', name: '$rw_get_global' },
-				arguments: [ clean_rw_arg(node) ],
+				arguments: [ clean_rw_arg(node), bound_get(parent) ],
 			},
 			rw_setter = node => ({
 				type:'CallExpression',
@@ -258,7 +256,7 @@ module.exports = class {
 				case'ExpressionStatement':
 					
 					if(node.directive == 'use asm')asm_bodies.push(parent);
-					else if(is_getter(node.expression))node.expression = rw_getter(node.expression);
+					else if(is_getter(node.expression))node.expression = rw_getter(node.expression, node);
 					
 					break;
 				case'ImportExpression':
@@ -297,14 +295,22 @@ module.exports = class {
 					break;
 				case'MemberExpression':
 					
-					if(!exact(node.property))replace(rw_getter(node));
-					else if(is_getter(node.object))node.object = rw_getter(node.object);
+					if(!exact(node.property))replace(rw_getter(node, parent));
+					else if(is_getter(node.object))node.object = rw_getter(node.object, node);
 					
 					break;
 			}
 		});
 		
-		return (options.inline ? '' : '/*$rw_vars*/(typeof importScripts=="function"&&/\\[native code]\\s+}$/.test(importScripts)&&importScripts(location.origin+' + JSON.stringify(this.config.prefix) + '+' + JSON.stringify(this.config.prefix + '/main.js?ts=' + this.bundle_ts) + '));/*$rw_vars*/\n') + esotope.generate(tree);
+		try{
+			var string = esotope.generate(tree);
+		}catch(err){
+			console.error(err);
+			
+			return '';
+		}
+		
+		return (options.inline ? '' : '/*$rw_vars*/(typeof importScripts=="function"&&/\\[native code]\\s+}$/.test(importScripts)&&importScripts(location.origin+' + JSON.stringify(this.config.prefix) + '+' + JSON.stringify(this.config.prefix + '/main.js') + '));/*$rw_vars*/\n') + string;
 	}
 	css(value, meta){
 		if(!value)return value;
@@ -429,10 +435,10 @@ module.exports = class {
 		var inject_attr = { name: 'data-rw-injected', value: '' };
 		
 		return [
-			{ nodeName: 'link', tagName: 'link', attrs: [ { name: 'type', value: 'image/x-icon' }, { name: 'rel', value: 'shortcut icon' }, { name: 'href', value: '?favicon' },  inject_attr ] },
+			{ nodeName: 'link', tagName: 'link', attrs: [ { name: 'type', value: 'image/x-icon' }, { name: 'rel', value: 'shortcut icon' }, { name: 'href', value: this.config.prefix + '/favicon' },  inject_attr ] },
 			{ nodeName: 'title', tagName: 'title', childNodes: [ { nodeName: '#text', value: this.config.title } ], attrs: [  inject_attr ] },
 			{ nodeName: 'meta', tagName: 'meta', attrs: [ { name: 'name', value: 'robots' }, { name: 'content', value: 'noindex,nofollow' }, inject_attr ] },
-			{ nodeName: 'script', tagName: 'script', attrs: [ { name: 'src', value: this.config.prefix + '/main.js?ts=' + this.bundle_ts }, inject_attr ] },
+			{ nodeName: 'script', tagName: 'script', attrs: [ { name: 'src', value: this.config.prefix + '/main.js' }, inject_attr ] },
 		];
 	}
 	async html_async(value, meta, options = {}){
@@ -494,7 +500,7 @@ module.exports = class {
 	attribute_type(data){
 		if(
 			data.name == 'background' ||
-			data.tag == 'link' && (data.rel.includes('preconnect') || data.rel.includes('preload')) && data.name == 'href' ||
+			data.tag == 'link' && (data.rel.includes('alternate') || data.rel.includes('preconnect') || data.rel.includes('preload')) && data.name == 'href' ||
 			data.tag == 'meta' && data.name == 'content' && (data.get_attr('itemprop') == 'image' || (data.get_attr('name') || '').includes('image') || data.get_attr('name') == 'url')
 		)return 'url';
 		else if(/^on[a-zA-Z]+$/.test(data.name))return 'js';
@@ -520,23 +526,25 @@ module.exports = class {
 			},
 		};
 		
+		if(typeof data.name != 'string' || data.name.startsWith('data-'))return data;
+		
 		if(data.value)data.value = data.value.toString();
+		else return data;
 		
 		data.rel = data.has_attr('rel') ? (data.get_attr('rel') || '').split(' ') : [];
-		
-		if(name.startsWith('data-'))return data;
 		
 		data.type = this.attribute_type(data);
 		
 		/*data.href = data.attrs.some(attr => attr.name == 'href');
 		
+		// rel can be set after href and cause issues
 		if(data.name == 'rel' && data.tag == 'link' && data.href)data.modify.push([ { name:	'href', value: this.url(this.unurl(data.href.value), meta, { route: this.attribute_route(Object.assign({}, data, { name: 'href' })) }) } ]);*/
 		
-		if(do_modify)switch(data.type){
+		if(do_modify && typeof data.value == 'string')switch(data.type){
 			case'url':
 				
-				data.value = data.name == 'srcset' ?
-					data.value.replace(this.regex.html.srcset, (m, url, size) => this.url(url, meta) + size)
+				data.value = data.name == 'srcset'
+					? data.value.replace(this.regex.html.srcset, (m, url, size) => this.url(url, meta) + size)
 					: name == 'xlink:href' && data.value.startsWith('#')
 						? data.value
 						: this.url(data.value, meta, { route: this.attribute_route(data), keep_input: true });
@@ -614,394 +622,6 @@ module.exports = class {
 		try{ out = new this.URL(...args) }catch(err){}
 		
 		return out;
-	}
-	hook_frame(node){
-		if(!node.src)node.contentWindow.rw_bundle = rw_bundle, new node.contentWindow.Function('(' + rw_bundle + ')()')();
-	}
-	exec_globals(){
-		if(typeof $rw_get == 'undefined'){
-			var rewriter = this,
-				Location = global.WorkerLocation || global.Location,
-				location = global.location,
-				Proxy = global.Proxy,
-				URL = global.URL,
-				// first argument is thisArg since call is binded
-				toString = (_=>_).call.bind([].toString),
-				defineProperty = Object.defineProperty,
-				defineProperties = Object.defineProperties,
-				getOwnPropertyDescriptor = Object.getOwnPropertyDescriptor,
-				getOwnPropertyDescriptors = Object.getOwnPropertyDescriptors,
-				getOwnPropertyNames = Object.getOwnPropertyNames,
-				getPrototypeOf = Object.getPrototypeOf,
-				setPrototypeOf = Object.setPrototypeOf,
-				hasOwnProperty = Object.hasOwnProperty,
-				fetch = global.fetch,
-				keys = Object.keys,
-				meta = () => ({
-					origin: location.origin,
-					base: rewriter.unurl(location.href, this.empty_meta),
-				}),
-				wrapped_locations = new Map(),
-				wrapped_location = original => {
-					var unproxied = new URL('http:a'),
-						location = setPrototypeOf({}, null);
-					
-					if(original.reload)location.reload = original.reload;
-					if(original.replace)location.replace = url => original.replace(this.url(new URL(url, meta().base).href, meta(), { route: 'html' }));
-					if(original.assign)location.assign = url => original.assign(this.url(new URL(url, meta().base).href, meta(), { route: 'html' }));
-					
-					defineProperties(location, Object.fromEntries(keys(getPrototypeOf(original)).concat(keys(original)).filter(prop => !hasOwnProperty.call(location, prop)).map(prop => [ prop, {
-						get(){
-							unproxied.href = rewriter.unurl(original.href, meta());
-							
-							var ret = Reflect.get(unproxied, prop);
-							
-							return typeof ret == 'function' ? Object.defineProperties(ret.bind(unproxied), Object.getOwnPropertyDescriptors(ret)) : ret;
-						},
-						set(value){
-							unproxied.href = rewriter.unurl(original.href, meta());
-							
-							var ret = Reflect.set(unproxied, prop, value);
-							
-							original.href = rewriter.url(unproxied.href, meta(), { route: 'html' });
-							
-							return ret;
-						},
-					} ])));
-					
-					wrapped_locations.set(original, location);
-					
-					return location;
-				},
-				rw_proxy = object => {
-					var proto = object != null && typeof object == 'object' && getPrototypeOf(object);
-					
-					if(proto && ['[object Location]', '[object WorkerLocation]'].includes(toString(proto)))return wrapped_locations.get(object) || wrapped_location(object);
-					return object;
-				},
-				rw_url = url => this.url(url, meta()),
-				rw_get = (object, property) => {
-					var ret = object[property];
-					
-					if(ret == global.eval && object == global)ret = script => eval(rw_eval(script));
-					
-					var out = rw_proxy(ret);
-					
-					if(typeof out == 'function')out = Object.defineProperties(out.bind(object), Object.getOwnPropertyDescriptors(out));
-					
-					return out;
-				},
-				rw_set = (object, property) => {
-					return {
-						set val(value){
-							var target = Reflect.get(object, property);
-							
-							if(target instanceof Location)return rw_proxy(target).href = value;
-							
-							return Reflect.set(object, property, value);
-						},
-					};
-				},
-				rw_eval = script => {
-					return this.js(script, meta(), { inline: true });
-				},
-				rw_Response = class extends Response {
-					get url(){
-						return rewriter.unurl(super.url, meta());
-					}
-				},
-				rw_func = (construct, args) => {
-					var decoy = construct(args),
-						script = args.splice(-1)[0],
-						proxied = construct([ ...args, 'return(' + this.js('()=>{' + script + '\n}', meta(), { inline: true }).slice(0, -1) + ')()' ]);
-					
-					defineProperty(proxied, 'length', { get: _ => decoy.length, set: _ => _ });
-					proxied.toString = Function.prototype.toString.bind(decoy);
-					
-					return proxied;
-				};
-			
-			this.createObjectURL = URL.createObjectURL;
-			this.revokeObjectURL = URL.revokeObjectURL;
-			
-			global.$rw_get = rw_get;
-			global.$rw_get_global = property => rw_get(global, property);
-			global.$rw_set = rw_set;
-			global.$rw_proxy = rw_proxy;
-			global.$rw_eval = rw_eval;
-			global.$rw_url = rw_url;
-			
-			if(global.URL){
-				if(global.URL.createObjectURL)global.URL.createObjectURL = new Proxy(global.URL.createObjectURL, {
-					apply: (target, that, [ source ]) => {
-						var url = Reflect.apply(target, that, [ source ]);
-						
-						this.blobs.set(url, this.blobs.get(source));
-						
-						return url;
-					},
-				});
-				
-				if(global.URL.revokeObjectURL)global.URL.revokeObjectURL = new Proxy(global.URL.revokeObjectURL, {
-					apply: (target, that, [ url ]) => {
-						var ret = Reflect.apply(target, that, [ url ]);
-						
-						this.blobs.delete(url);
-						
-						return ret;
-					},
-				});
-			}
-			
-			if(global.Blob)global.Blob = global.Blob.prototype.constructor = new Proxy(global.Blob, {
-				construct: (target, [ data, opts ]) => {
-					var blob = Reflect.construct(target, [ data, opts ]);
-					
-					this.blobs.set(blob, data);
-					
-					return blob;
-				},
-			});
-			
-			if(global.Navigator)global.Navigator.prototype.sendBeacon = new Proxy(global.Navigator.prototype.sendBeacon, {
-				apply: (target, that, [ url, data ]) => Reflect.apply(target, that, [ this.url(new URL(url, location).href, meta(), data) ]),
-			});
-			
-			if(global.Function)global.Function =global.Function.prototype.constructor = new Proxy(global.Function, {
-				apply: (target, that, args) => rw_func(args => Reflect.apply(target, that, args), args),
-				construct: (target, args) => rw_func(args => Reflect.construct(target, args), args),
-			});
-			
-			if(global.importScripts)global.importScripts = new Proxy(global.importScripts, {
-				apply: (target, that, [ url ]) => Reflect.apply(target, that, [ this.url(new URL(url, location).href, meta(), { route: 'js' }) ]),
-			});
-			
-			if(global.Worker)global.Worker = global.Worker.prototype.constructor = new Proxy(global.Worker, {
-				construct: (target, [ url ]) => Reflect.construct(target, [ this.url(new URL(url, location).href, meta(), { route: 'js' }) ]),
-			});
-			
-			if(global.fetch)global.fetch = new Proxy(global.fetch, {
-				apply: (target, that, [ url, opts ]) => new Promise((resolve, reject) => Reflect.apply(target, that, [ this.url(url, meta()), opts ]).then(res => resolve(setPrototypeOf(res, rw_Response.prototype))).catch(reject)),
-			});
-			
-			if(global.XMLHttpRequest)global.XMLHttpRequest = class extends global.XMLHttpRequest {
-				open(method, url, ...args){
-					return super.open(method, rewriter.url(new URL(url, location).href, meta()), ...args);
-				}
-				get responseURL(){
-					return rewriter.unurl(super.responseURL, meta());
-				}
-			};
-			
-			if(global.History)global.History.prototype.pushState = new Proxy(global.History.prototype.pushState, {
-				apply: (target, that, [ state, title, url = '' ]) => Reflect.apply(target, that, [ state, this.config.title, this.url(url, meta(), { route: 'html' }) ]),
-			}), global.History.prototype.replaceState = new Proxy(global.History.prototype.replaceState, {
-				apply: (target, that, [ state, title, url = '' ]) => Reflect.apply(target, that, [ state, this.config.title, this.url(url, meta(), { route: 'html' }) ]),
-			});
-			
-			if(global.WebSocket)global.WebSocket = class extends global.WebSocket {
-				constructor(url, proto){
-					super(rewriter.url(new URL(url, location).href, meta(), { ws: true }), proto);
-					
-					var open;
-					
-					this.addEventListener('open', event => event.stopImmediatePropagation(), { once: true });
-					// first packet is always `open`
-					this.addEventListener('message', event => (event.stopImmediatePropagation(), this.dispatchEvent(new Event('open'))), { once: true });
-				}
-			};
-			
-			// dom context
-			if(global.Node){
-				var getAttribute = global.Element.prototype.getAttribute,
-					setAttribute = global.Element.prototype.setAttribute;
-				
-				new global.MutationObserver(mutations => [...mutations].forEach(mutation => {
-					[...mutation.addedNodes].forEach(node => node.tagName == 'IFRAME' && this.hook_frame(node));
-					if(mutation.target.tagName == 'IFRAME')this.hook_frame(mutation.target);
-				})).observe(document, { childList: true, attributes: true, subtree: true });
-				
-				global.Element.prototype.getAttribute = new Proxy(global.Element.prototype.getAttribute, {
-					apply: (target, that, [ attr ]) => {
-						var value = Reflect.apply(target, that, [ attr ]),
-							data = this.attribute({ // get precise type info without modifying
-								tagName: that.tagName,
-								getAttribute: getAttribute.bind(that),
-								getAttributeNames: that.getAttributeNames.bind(that),
-							}, attr, value, meta(), false);
-						
-						return data.value && this['un' + data.type] ? this['un' + data.type](data.value, meta()) : value;
-					},
-				});
-				
-				global.Element.prototype.setAttribute = new Proxy(global.Element.prototype.setAttribute, {
-					apply: (target, that, [ attr, value ]) => {
-						var data = this.attribute(that, attr, value, meta());
-						
-						if(data.preserve_source)setAttribute.call(that, data.name + '-rw', value);
-						
-						if(data.deleted)return that.removeAttribute(attr);
-						
-						data.modify.forEach(attr => Reflect.apply(target, that, [ attr.name, attr.value ]));
-						
-						return Reflect.apply(target, that, [ data.name, data.value ]);
-					},
-				});
-				
-				var script_handler = desc => ({
-						get(){
-							return rewriter.unjs(desc.get.call(this) || '', meta());
-						},
-						set(value){
-							return desc.set.call(this, rewriter.js(value || '', meta()));
-						},
-					}),
-					style_handler = desc => ({
-						get(){
-							return rewriter.uncss(desc.get.call(this) || '', meta());
-						},
-						set(value){
-							return desc.set.call(this, rewriter.css(value || '', meta()));
-						},
-					});
-				
-				defineProperties(global.HTMLScriptElement.prototype, {
-					text: script_handler(getOwnPropertyDescriptor(global.HTMLScriptElement.prototype, 'text')),
-					innerHTML: script_handler(getOwnPropertyDescriptor(global.Element.prototype, 'innerHTML')),
-					innerText: script_handler(getOwnPropertyDescriptor(global.HTMLElement.prototype, 'innerText')),
-					outerText: style_handler(getOwnPropertyDescriptor(global.HTMLElement.prototype, 'innerText')),
-					textContent: script_handler(getOwnPropertyDescriptor(global.Node.prototype, 'textContent')),
-				});
-				
-				defineProperties(global.HTMLStyleElement.prototype, {
-					innerHTML: style_handler(getOwnPropertyDescriptor(global.Element.prototype, 'innerHTML')),
-					innerText: style_handler(getOwnPropertyDescriptor(global.HTMLElement.prototype, 'innerText')),
-					outerText: style_handler(getOwnPropertyDescriptor(global.HTMLElement.prototype, 'innerText')),
-					textContent: style_handler(getOwnPropertyDescriptor(global.Node.prototype, 'textContent')),
-				});
-				
-				var html_handler = desc => ({
-					get(){
-						return rewriter.unhtml(desc.get.call(this) || '', meta(), { snippet: true });
-					},
-					set(value){
-						return desc.set.call(this, rewriter.html(value || '', meta(), { snippet: true }));
-					},
-				});
-				
-				defineProperties(global.Element.prototype, {
-					innerHTML: html_handler(getOwnPropertyDescriptor(global.Element.prototype, 'innerHTML')),
-					outerHTML: html_handler(getOwnPropertyDescriptor(global.Element.prototype, 'outerHTML')),
-				});
-				
-				var titles = new Map(),
-					title = getOwnPropertyDescriptor(global.Document.prototype, 'title').get;
-				
-				defineProperties(global.Document.prototype, {
-					title: {
-						get(){
-							if(!titles.has(this))titles.set(this, title.call(this));
-							
-							return titles.get(this);
-						},
-						set(value){
-							return titles.set(this, value);
-						},
-					},
-					cookie: {
-						get(){
-							return '';
-						},
-						set: value => {
-							fetch(this.config.prefix + '?cookie', {
-								headers: {
-									'content-type': 'application/json',
-								},
-								method: 'POST',
-								body: JSON.stringify({
-									url: location.href,
-									value: value,
-								}),
-							});
-						},
-					},
-				});
-				
-				this.attr.inherits_url.forEach(prop => {
-					if(!global[prop])return;
-					
-					var proto = global[prop].prototype,
-						descs = getOwnPropertyDescriptors(proto);
-					
-					this.attr.url[1].forEach(attr => descs.hasOwnProperty(attr) && defineProperty(proto, attr, {
-						get(){
-							return this.getAttribute(attr);
-						},
-						set(value){
-							return this.setAttribute(attr, value);
-						},
-					}));
-					
-					this.attr.del[1].forEach((attr, set_val) => (set_val = new Map()) && descs.hasOwnProperty(attr) && defineProperty(proto, attr, {
-						get(){
-							return set_val.has(this) ? set_val.get(this) : (set_val.set(this, getAttribute.call(this, attr)), set_val.get(this))
-						},
-						set(value){
-							set_val.set(this, value);
-							
-							return value;
-						},
-					}));
-				});
-				
-				defineProperties(global.HTMLAnchorElement.prototype, Object.fromEntries(['origin', 'protocol', 'username', 'password', 'host', 'hostname', 'port', 'pathname', 'search', 'hash'].map(attr => [ attr, {
-					get(){
-						return new URL(this.getAttribute('href'), meta().base)[attr];
-					},
-					set(value){
-						var curr = new URL(this.getAttribute('href'));
-						
-						curr[attr] = value;
-						
-						this.setAttribute('href', curr.ref);
-						
-						return value;
-					},
-				} ])));
-				
-				global.postMessage = new Proxy(global.postMessage, {
-					apply: (target, that, [ data, origin, transfer ]) => Reflect.apply(target, that, [ JSON.stringify([ 'proxy', data, origin ]), location.origin, transfer ]),
-				});
-				
-				global.addEventListener('message', event => {
-					var data;
-					
-					try{
-						data = JSON.parse(event.data);
-					}catch(err){}
-					
-					if(!data || data[0] != 'proxy')return;
-					
-					defineProperties(event, {
-						data: { get: _ => data[1], set: _ => _ },
-						origin: { get: _ => data[2], set: _ => _ },
-					});
-				});
-				
-				delete global.navigator.getUserMedia;
-				delete global.navigator.mozGetUserMedia;
-				delete global.navigator.webkitGetUserMedia;
-				delete global.MediaStreamTrack;
-				delete global.mozMediaStreamTrack;
-				delete global.webkitMediaStreamTrack;
-				delete global.RTCPeerConnection;
-				delete global.mozRTCPeerConnection;
-				delete global.webkitRTCPeerConnection;
-				delete global.RTCSessionDescription;
-				delete global.mozRTCSessionDescription;
-				delete global.webkitRTCSessionDescription;
-			}
-		}
 	}
 };
 
