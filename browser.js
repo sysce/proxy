@@ -403,7 +403,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 					},
 					cookie: {
 						get(){
-							return cookies.format_object(rw_exposed_cookies);
+							return cookies.format_object(rw_exposed_cookies).join(' ');
 						},
 						set: value => {
 							fetch(this.config.prefix + '/cookie', {

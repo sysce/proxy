@@ -237,11 +237,23 @@ module.exports = class {
 				arguments: [ node.object, clean_rw_arg(node.property) ],
 			}),
 			clean_rw_arg = node => node.type == 'Identifier' ? { type: 'Literal', value: node.name } : node,
-			asm_bodies = [];
+			asm_bodies = [],
+			_parent = Symbol(),
+			_index = Symbol();
 		
 		this.walk_est(tree, (node, parent, index, nodes) => {
+			parent = node[_parent] || parent;
+			index = node[_index] || index;
+			
 			var contains = node => this.iterate_est(parent[index], []).includes(node),
-				replace = node => parent[index] = node;
+				replace = node => {
+					parent[index] = node;
+					
+					for(var name in node)if(typeof node[name] == 'object' && node[name] != null && !Array.isArray(node[name])){
+						node[name][_parent] = node;
+						node[name][_index] = name;
+					}
+				};
 			
 			switch(node.type){
 				case'CallExpression':
