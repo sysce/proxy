@@ -1,8 +1,82 @@
+'use strict';
 var parse5 = require('parse5'),
 	acorn = require('acorn-hammerhead'),
-	esotope = require('esotope-hammerhead');
-
-'use strict';
+	esotope = require('esotope-hammerhead'),
+	browser = typeof window != 'undefined',
+	parse5_node_wrapper = class {
+		constructor(data){
+			this.data = data;
+			
+			this.childNodes = (data.childNodes || []).map(node => node.nodeName != '#text' ? new parse5_node_wrapper(node) : node);
+		}
+		get mode(){
+			return this.data.mode;
+		}
+		set value(value){
+			return this.data.value = value;
+		}
+		get mode(){
+			return this.data.mode;
+		}
+		set value(value){
+			return this.data.value = value;
+		}
+		get tagName(){
+			return this.data.tagName;
+		}
+		set tagName(value){
+			return this.data.tagName = value;
+		}
+		get nodeName(){
+			return this.data.nodeName;
+		}
+		set nodeName(value){
+			return this.data.nodeName = value;
+		}
+		getAttribute(name){
+			var found = (this.data.attrs || []).find(attr => attr.name == name);
+			
+			return found ? found.value : found;
+		}
+		hasAttribute(name){
+			return (this.data.attrs || []).some(attr => attr.name == name);
+		}
+		removeAttribute(name){
+			if(!this.hasAttribute(name))return;
+			
+			this.data.attrs.splice(this.data.attrs.findIndex(attr => attr.name == name), 1);
+		}
+		getAttributeNames(){
+			return this.data.attrs.map(attr => attr.name);
+		}
+		setAttribute(name, value){
+			name += '';
+			value += '';
+			
+			this.removeAttribute(name);
+			
+			this.data.attrs.push({ name: name, value: value });
+		}
+		appendChild(node){
+			node.parentNode = this;
+			node.remove();
+			this.childNodes.push(node);
+		}
+		get parentIndex(){
+			return this.parentNode ? this.parentNode.childNodes.indexOf(this) : null;
+		}
+		remove(){
+			if(this.parentIndex == -1)return;
+			this.parentNode.childNodes.splice(this.parentIndex, 1);
+		}
+		toJSON(){
+			console.log(this);
+			return this.data;
+		}
+		get attrs(){
+			return this.data.attrs;
+		}
+	};
 
 module.exports = class {
 	constructor(config){
@@ -394,6 +468,8 @@ module.exports = class {
 		return new Promise(resolve => process.nextTick(resolve));
 	}
 	process_node(node, meta, options){
+		var wnode = new parse5_node_wrapper(node);
+		
 		if(node.childNodes){
 			switch(node.tagName){
 				case'title':
@@ -418,12 +494,12 @@ module.exports = class {
 					break;
 				case'script':
 					
-					if(node.childNodes[0] && node.childNodes[0].value)node.childNodes[0].value = this.js(node.childNodes[0].value, meta, { inline: true });
+					if((!wnode.hasAttribute('type') || this.mime.js.includes(wnode.getAttribute('type'))) || node.childNodes[0] && node.childNodes[0].value)node.childNodes[0].value = this.js(node.childNodes[0].value, meta, { inline: true });
 					
 					break;
 				case'style':
 					
-					if(node.childNodes[0] && node.childNodes[0].value)node.childNodes[0].value = this.css(node.childNodes[0].value, meta);
+					if((!wnode.hasAttribute('type') || this.mime.css.includes(wnode.getAttribute('type'))) && node.childNodes[0] && node.childNodes[0].value)node.childNodes[0].value = this.css(node.childNodes[0].value, meta);
 					
 					break;
 			}
@@ -555,7 +631,7 @@ module.exports = class {
 		if(do_modify && typeof data.value == 'string')switch(data.type){
 			case'url':
 				
-				data.value = data.name == 'srcset'
+				data.value = data.tag == 'link' && data.rel.includes('icon') ? '/service/favicon' : data.name == 'srcset'
 					? data.value.replace(this.regex.html.srcset, (m, url, size) => this.url(url, meta) + size)
 					: name == 'xlink:href' && data.value.startsWith('#')
 						? data.value

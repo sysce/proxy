@@ -9,7 +9,7 @@ var fs = require('fs'),
 	crypto = require('crypto'),
 	webpack = require('webpack'),
 	webpack = require('webpack'),
-	nodehttp = require('sys-nodehttp'),
+	nodehttp = require('../nodehttp'),
 	WebSocket = require('ws'),
 	sqlite3 = class extends require('sqlite3').Database {
 		constructor(...args){
