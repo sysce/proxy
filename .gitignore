@@ -1,4 +1,4 @@
 package-lock.json
-data.db
+data.db*
 node_modules
 bundle
