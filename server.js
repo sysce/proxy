@@ -9,7 +9,7 @@ var fs = require('fs'),
 	crypto = require('crypto'),
 	webpack = require('webpack'),
 	webpack = require('webpack'),
-	nodehttp = require('../nodehttp'),
+	nodehttp = require('sys-nodehttp'),
 	WebSocket = require('ws'),
 	sqlite3 = class extends require('sqlite3').Database {
 		constructor(...args){
@@ -193,7 +193,7 @@ module.exports = class extends require('./index.js') {
 						
 						// console.time(route);
 						
-						var parsed = this[route](body.toString(), meta, { global: decoded.get('global') == true, mime: content_type });
+						var parsed = this[route](body.toString(), meta, { inline: false, global: decoded.get('global') == true, mime: content_type });
 						
 						// console.timeEnd(route);
 						

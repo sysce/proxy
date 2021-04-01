@@ -12,6 +12,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				location = global.location,
 				Proxy = global.Proxy,
 				URL = global.URL,
+				proxied = Symbol(),
 				// first argument is thisArg since call is binded
 				toString = (_=>_).call.bind([].toString),
 				toStringFunc = (_=>_).call.bind((_=>_).toString),
@@ -25,6 +26,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				hasOwnProperty = Object.hasOwnProperty,
 				fromEntries = Object.fromEntries,
 				fetch = global.fetch,
+				Request = global.Request,
 				keys = Object.keys,
 				meta = () => ({
 					origin: location.origin,
@@ -69,22 +71,26 @@ var rw_bundle = this && arguments.callee.caller.caller,
 					if(proto && ['[object Location]', '[object WorkerLocation]'].includes(toString(proto)))return wrapped_locations.get(object) || wrapped_location(object);
 					return object;
 				},
-				bind_proxy = (obj, func, prox) => (prox = new Proxy(func, {
+				bind_proxy = (obj, obj_prox, func, prox) => prox = new Proxy(func, {
 					construct(target, args){
 						return Reflect.construct(target, args);
 					},
 					apply(target, that, args){
-						return Reflect.apply(target, that == prox ? obj : that, args);
+						try{
+							return Reflect.apply(target, that == obj_prox ? obj : that, args);
+						}catch(err){
+							console.log(obj_prox);
+						}
 					},
 					get(target, prop){
 						var ret = Reflect.get(target, prop);
 						
-						return typeof ret == 'function' ? bind_proxy(func, ret) : ret;
+						return typeof ret == 'function' ? bind_proxy(func, prox, ret) : ret;
 					},
 					set(target, prop, value){
 						return Reflect.set(target, prop, value);
 					},
-				})),
+				}),
 				rw_global_eval = script => eval(rw_eval(script)),
 				rw_url = url => this.url(url, meta()),
 				rw_get = (object, property, bound) => {
@@ -95,8 +101,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 					
 					var out = rw_proxy(ret);
 					
-					// USE PROXY INSTEAD OF BINDING, NEW PROPERTIES SET WILL NOT BE ON ORIGINAL
-					if(typeof out == 'function' && bound)out = bind_proxy(object, out);
+					if(typeof out == 'function' && bound)out = bind_proxy(object, {}, out);
 					
 					return out;
 				},
@@ -113,11 +118,6 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				},
 				rw_eval = script => {
 					return this.js(script, meta(), { inline: true });
-				},
-				rw_Response = class extends Response {
-					get url(){
-						return rewriter.unurl(super.url, meta());
-					}
 				},
 				rw_func = (construct, args) => {
 					var decoy = construct(args),
@@ -189,8 +189,26 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				construct: (target, [ url ]) => Reflect.construct(target, [ this.url(new URL(url, location).href, meta(), { route: 'js' }) ]),
 			});
 			
+			if(global.Response){
+				var resp_desc = getOwnPropertyDescriptor(global.Response, 'url');
+				
+				// maybe define headers too as they are changed
+				defineProperty(global.Response, 'url', {
+					get(){
+						var value = resp_desc.call(this);
+						
+						return this[proxied] ? rewriter.unurl(value, meta()) : value;
+					}
+				});
+			}
+			
 			if(global.fetch)global.fetch = new Proxy(global.fetch, {
-				apply: (target, that, [ url, opts ]) => new Promise((resolve, reject) => Reflect.apply(target, that, [ this.url(url, meta()), opts ]).then(res => resolve(setPrototypeOf(res, rw_Response.prototype))).catch(reject)),
+				apply: (target, that, [ url, opts ]) => {
+					if(toString(url) == '[object Request]')url = new Request(this.url(url.url, meta()), url);
+					else url = this.url(url, meta());
+					
+					return new Promise((resolve, reject) => Reflect.apply(target, that, [ url, opts ]).then(res => (res[proxied] = true, resolve(res))).catch(reject));
+				},
 			});
 			
 			if(global.XMLHttpRequest)global.XMLHttpRequest = class extends global.XMLHttpRequest {
@@ -223,66 +241,81 @@ var rw_bundle = this && arguments.callee.caller.caller,
 			var get_sandbox_host = () => new URL(meta().base).hostname;
 			
 			if(global.Storage){
-				var sync = Symbol(),
-					get_item = global.Storage.prototype.getItem,
-					set_item = global.Storage.prototype.setItem,
-					sync_sandbox = function(obj = this){
-						set_item.call(storage, get_sandbox_host(), obj);
-					},
-					get_sandbox = storage => {
-						var sandbox = setPrototypeOf(JSON.parse(get_item.call(storage, get_sandbox_host()) || '{}'), null);
+				var storage_sandbox = {
+					instances: [ 'localStorage', 'sessionStorage' ],
+					sync: Symbol(),
+					get_item: global.Storage.prototype.getItem,
+					set_item: global.Storage.prototype.setItem,
+					proxies: new Map(),
+					get(storage){
+						storage = this.proxies.has(storage) ? this.proxies.get(storage) : storage;
 						
-						sandbox[sync] = sync_sandbox;
+						var sandbox = setPrototypeOf(JSON.parse(this.get_item.call(storage, get_sandbox_host()) || '{}'), null);
+						
+						sandbox[storage_sandbox.sync] = () => this.set_item.call(storage, get_sandbox_host(), JSON.stringify(sandbox));
 						
 						return sandbox;
-					};
+					},
+					args(method, minimum, value){
+						if(value < minimum)throw new TypeError("Failed to execute '" + method + "' on 'Storoage': " + minimum + ' argument required, but only ' + value + ' present.');
+						
+						return value;
+					},
+				};
 				
 				Object.defineProperty(global.Storage.prototype, 'length', {
 					get(){
-						return keys(get_sandbox(this)).length;
+						return keys(storage_sandbox.get(this)).length;
 					},
 				});
 				
-				global.Storage.prototype.key = function(ind){
-					return keys(get_sandbox(this))[ind];
+				global.Storage.prototype.key = function(...args){
+					var [ index ] = storage_sandbox.args('key', 1, args);
+					
+					return keys(storage_sandbox.get(this))[index];
 				};
 				
 				global.Storage.prototype.clear = function(){
-					sandbox[sync]({});
+					storage_sandbox.get(this)[storage_sandbox.sync]({});
 				};
 				
-				global.Storage.prototype.removeItem = function(item){
-					var sandbox = get_sandbox(this);
+				global.Storage.prototype.removeItem = function(...args){
+					var [ item ] = storage_sandbox.args('removeItem', 1, args),
+						sandbox = storage_sandbox.get(this);
 					
 					delete sandbox[item];
 					
-					sandbox[sync]();
+					sandbox[storage_sandbox.sync]();
 				};
 				
 				global.Storage.prototype.hasOwnProperty = function(item){
-					return typeof get_sandbox(this)[item] != 'undefined';
+					return !hasOwnProperty.call(this, item) && typeof storage_sandbox.get(this)[item] != 'undefined';
 				};
 				
-				global.Storage.prototype.getItem = function(item){
-					return get_sandbox(this)[item];
-				};
-				
-				global.Storage.prototype.setItem = function(item, value){
-					var sandbox = get_sandbox(this);
+				global.Storage.prototype.getItem = function(...args){
+					var [ item ] = storage_sandbox.args('getItem', 1, args);
 					
-					sandbox[item] = toString(value);
-					
-					sandbox[sync]();
+					return storage_sandbox.get(this)[item];
 				};
 				
-				if(global.localStorage)defineProperties(global, fromEntries(['localStorage', 'sessionStorage'].map((storage, prox, targ) => (prox = new Proxy(targ, {
-					get: (target, prop, ret) => typeof (ret = Reflect.get(target, prop)) == 'string' ? get_sandbox(target)[item] : typeof ret == 'function' ? bind_proxy(target, ret) : ret,
+				global.Storage.prototype.setItem = function(...args){
+					var [ item, value ] = storage_sandbox.args('setItem', 2, args),
+						sandbox = storage_sandbox.get(this);
+					
+					sandbox[item] = value + '';
+					
+					sandbox[storage_sandbox.sync]();
+				};
+				
+				defineProperties(global, fromEntries(storage_sandbox.instances.filter(storage => typeof global[storage] == 'object').map((storage, prox) => (storage_sandbox.proxies.set(prox = new Proxy(global[storage], {
+					get: (target, prop, ret) => typeof (ret = Reflect.get(target, prop)) == 'function' ? ret : typeof ret == 'string' ? storage_sandbox.get(target)[item] : ret,
 					set: (target, prop, value) => {
-						var proto = getPrototypeOf(target);
+						var proto = getPrototypeOf(target),
+							sandbox = storage_sandbox.get(target);
 						
-						return target.hasOwnProperty(prop) ? Reflect.set(target, prop, value) : proto.setItem.call(target, prop);
+						return target.hasOwnProperty(prop) ? Reflect.set(target, prop, value) : (sandbox[prop] = value += '', sandbox[storage_sandbox.sync]());
 					},
-				}), [ storage, {
+				}), global[storage]), [ storage, {
 					get: _ => prox,
 					configurable: true,
 					enumerable: true,
@@ -317,28 +350,14 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				global.Element.prototype.getAttribute = new Proxy(global.Element.prototype.getAttribute, {
 					apply: (target, that, [ attr ]) => {
 						var value = Reflect.apply(target, that, [ attr ]),
-							data = this.attribute({ // get precise type info without modifying
-								tagName: that.tagName,
-								getAttribute: getAttribute.bind(that),
-								getAttributeNames: that.getAttributeNames.bind(that),
-							}, attr, value, meta(), false);
+							type = this.attribute_type(that, attr, getAttribute, setAttribute);
 						
-						return data.value && this['un' + data.type] ? this['un' + data.type](data.value, meta()) : value;
+						return value && this['un' + type] ? this['un' + type](value, meta()) : value;
 					},
 				});
 				
 				global.Element.prototype.setAttribute = new Proxy(global.Element.prototype.setAttribute, {
-					apply: (target, that, [ attr, value ]) => {
-						var data = this.attribute(that, attr, value, meta());
-						
-						if(data.preserve_source)setAttribute.call(that, data.name + '-rw', value);
-						
-						if(data.deleted)return that.removeAttribute(attr);
-						
-						data.modify.forEach(attr => Reflect.apply(target, that, [ attr.name, attr.value ]));
-						
-						return Reflect.apply(target, that, [ data.name, data.value ]);
-					},
+					apply: (target, that, [ attr, value ]) => this.attribute(that, attr, value, meta(), getAttribute, setAttribute),
 				});
 				
 				var script_handler = desc => ({

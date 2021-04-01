@@ -1,13 +1,24 @@
 'use strict';
-var parse5 = require('parse5'),
+var css = require('css-tree'),
+	parse5 = require('parse5'),
 	acorn = require('acorn-hammerhead'),
 	esotope = require('esotope-hammerhead'),
 	browser = typeof window != 'undefined',
+	iterate = (node, out = [ [ [ node ], 0 ] ]) => {
+		// [ parent, index ]
+		if(node.childNodes)for(var ind = 0; ind < node.childNodes.length; ind++)out.push([ node.childNodes, ind ]), iterate(node.childNodes[ind], out);
+		
+		return out;
+	},
 	parse5_node_wrapper = class {
 		constructor(data){
 			this.data = data;
-			
-			this.childNodes = (data.childNodes || []).map(node => node.nodeName != '#text' ? new parse5_node_wrapper(node) : node);
+		}
+		get childNodes(){
+			return (this.data.childNodes || []).map(node => node.nodeName != '#text' ? new parse5_node_wrapper(node) : node);
+		}
+		set childNodes(value){
+			return this.data.childNodes = (value || []).map(node => node.nodeName != '#text' ? new parse5_node_wrapper(node) : node);
 		}
 		get mode(){
 			return this.data.mode;
@@ -47,7 +58,7 @@ var parse5 = require('parse5'),
 			this.data.attrs.splice(this.data.attrs.findIndex(attr => attr.name == name), 1);
 		}
 		getAttributeNames(){
-			return this.data.attrs.map(attr => attr.name);
+			return (this.data.attrs || []).map(attr => attr.name);
 		}
 		setAttribute(name, value){
 			name += '';
@@ -63,18 +74,27 @@ var parse5 = require('parse5'),
 			this.childNodes.push(node);
 		}
 		get parentIndex(){
-			return this.parentNode ? this.parentNode.childNodes.indexOf(this) : null;
+			return this.parentNode ? this.parentNode.childNodes.indexOf(this) : -1;
 		}
 		remove(){
 			if(this.parentIndex == -1)return;
 			this.parentNode.childNodes.splice(this.parentIndex, 1);
 		}
+		get textContent(){
+			return iterate(this, []).map(([ par, ind]) => par[ind].nodeName == '#text' ? par[ind].value : null).filter(x => x).join(' ');
+		}
+		set textContent(value){
+			return this.childNodes = [ { nodeName: '#text', value: value, parentNode: this } ];
+		}
 		toJSON(){
-			console.log(this);
+			// console.log(this);
 			return this.data;
 		}
 		get attrs(){
 			return this.data.attrs;
+		}
+		get parentNode(){
+			return this.data.parentNode;
 		}
 	};
 
@@ -109,16 +129,8 @@ module.exports = class {
 		this.empty_meta = { base: 'http:a', origin: 'about:' };
 		
 		this.regex = {
-			prw_ind: /\/\*(pmrw\d+)\*\/[\s\S]*?\/\*\1\*\//g,
-			css: {
-				url: /(?!(["'`])[^"'`]*?\1)(?<![^\s:])url\(((?:[^"'`]|(["'`])[^"'`]*?\3)*?)\)/g,
-				import: /(@import\s*?(\(|"|'))([\s\S]*?)(\2|\))/gi,
-				property: /(\[)(\w+)(\*?=.*?]|])/g,
-			},
 			html: {
 				srcset: /(\S+)(\s+\d\S)/g,
-				newline: /\n/g,
-				attribute: /([a-z_-]+)(?:$|\s*?=\s*?(true|false|(["'`])((\\["'`]|[^"'`])*?)\3))/gi,
 			},
 			url: {
 				proto: /^([^\/]+:)/,
@@ -398,30 +410,42 @@ module.exports = class {
 		
 		return (options.inline ? '' : '/*$rw_vars*/(typeof importScripts=="function"&&/\\[native code]\\s+}$/.test(importScripts)&&importScripts(location.origin+' + JSON.stringify(this.config.prefix) + '+' + JSON.stringify(this.config.prefix + '/main.js') + '));/*$rw_vars*/\n') + string;
 	}
-	css(value, meta){
-		if(!value)return value;
+	css(value, meta, options = {}){
+		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
 		
-		value += '';
+		this.validate_meta(meta);
 		
-		meta = Object.assign({}, meta);
-		
-		if(meta.url)meta.base = meta.url.toString();
-		
-		[
-			[this.regex.css.url, (match, a, field) => {
-				var wrap = '';
-				
-				if(['\'', '"', '`'].includes(field[0]))wrap = field[0], field = field.slice(1, -1);
-				
-				if(!wrap)wrap = '"';
-				
-				field = wrap + this.url(field, meta, { route: 'image' }) + wrap;
-				
-				return 'url(' + field + ')';
-			} ],
-			[this.regex.sourcemap, '# undefined'],
-			[this.regex.css.import, (m, start, quote, url) => start + this.url(url, meta, { route: 'css' }) + quote ],
-		].forEach(([ reg, val ]) => value = value.replace(reg, val));
+		try{
+			var tree = css.parse(value + '\n\n@import "sus!"; @import url("chrome://airpod-shotty/");'),
+				read_string = str => {
+					if(["'", '"'].includes(str[0])){
+						var quote = str[0];
+						
+						str = [...str.slice(1, -1)].map((char, ind, arr) => char == '\\' && arr[ind + 1] == quote ? null : char).filter(val => val != null).join('');
+					}
+					
+					return str;
+				};
+			
+			css.walk(tree, node => {
+				if(node.name == 'import')css.walk(node, snode => {
+					if(snode.type == 'String' && !snode.rewritten)snode.rewritten = true, snode.value = JSON.stringify(this.url(read_string(snode.value), meta, { route: 'css' }));
+				});
+				else if(node.type == 'Url'){
+					css.walk(node, snode => {
+						if(snode.rewritten || snode.type != 'String')return;
+						
+						snode.rewritten = true;
+						snode.value = JSON.stringify(this.url(read_string(snode.value), meta));
+					});
+				}
+			});
+			
+			return css.generate(tree);
+		}catch(err){
+			console.error(err);
+			return value;
+		}
 		
 		return value;
 	}
@@ -474,50 +498,36 @@ module.exports = class {
 			switch(node.tagName){
 				case'title':
 					
-					node.deleted = true;
+					wnode.remove();
 					
 					break;
 				case'base':
+				
+					var href = node.getAttribute('href');
 					
-					if(node.attrs){
-						var href = node.attrs.find(attr => attr.name == 'href');
+					if(href){
+						var valid = this.valid_url(href.value, meta.base);
 						
-						if(href){
-							var valid = this.valid_url(href.value, meta.base);
-							
-							if(valid)meta.base = valid.href;
-						}
-						
-						node.deleted = true;
+						if(valid)meta.base = valid.href;
 					}
+					
+					wnode.remove();
 					
 					break;
 				case'script':
 					
-					if((!wnode.hasAttribute('type') || this.mime.js.includes(wnode.getAttribute('type'))) || node.childNodes[0] && node.childNodes[0].value)node.childNodes[0].value = this.js(node.childNodes[0].value, meta, { inline: true });
+					if((!wnode.hasAttribute('type') || this.mime.js.includes(wnode_getAttribute('type'))) && wnode.textContent)wnode.textContent = this.js(wnode.textContent, meta, { inline: true });
 					
 					break;
 				case'style':
 					
-					if((!wnode.hasAttribute('type') || this.mime.css.includes(wnode.getAttribute('type'))) && node.childNodes[0] && node.childNodes[0].value)node.childNodes[0].value = this.css(node.childNodes[0].value, meta);
+					if((!wnode.hasAttribute('type') || this.mime.css.includes(wnode_getAttribute('type'))) && wnode.textContent)wnode.textContent = this.css(wnode.textContent, meta);
 					
 					break;
 			}
-			
-			node.childNodes = node.childNodes.filter(node => !node.deleted);
 		};
 		
-		if(node.attrs)node.attrs.forEach(attr => {
-			var data = this.attribute(node, attr.name, attr.value, meta);
-			
-			// if(!data.modified)return attr;
-			if(data.deleted)return attr.deleted;
-			
-			attr.name = data.name;
-			attr.value = data.value;
-			
-			if(data.preserve_source)node.attrs.push({ name: data.name + '-rw', value: attr.value });
-		}), node.attrs = node.attrs.filter(attr => !attr.deleted);
+		wnode.getAttributeNames().forEach(name => this.attribute(node, name, wnode.getAttribute(name), meta));
 	}
 	inject_head(){
 		var inject_attr = { name: 'data-rw-injected', value: '' };
@@ -581,92 +591,83 @@ module.exports = class {
 		else if(data.tag == 'link'){ // link tags
 			if(data.rel.includes('stylesheet'))return 'css';
 			else if(data.rel.includes('manifest'))return 'manifest';
+			else console.log(data);
 		}else if(data.tag == 'script' && data.name == 'src')return 'js';
 		
 		return false;
 	}
-	attribute_type(data){
+	attribute_type(node, name, wnode_getAttribute, wnode_setAttribute){
+		var wnode = typeof global.Node == 'function' && node instanceof global.Node ? node : new parse5_node_wrapper(node);
+		
+		wnode_setAttribute = (wnode_setAttribute || wnode.setAttribute).bind(wnode);
+		wnode_getAttribute = (wnode_getAttribute || wnode.getAttribute).bind(wnode);
+		
+		var tag = (wnode.tagName || '').toLowerCase(),
+			rel = wnode.hasAttribute('rel') ? (wnode_getAttribute('rel') || '').split(' ') : [];
+		
 		if(
-			data.name == 'background' ||
-			data.tag == 'link' && (data.rel.includes('alternate') || data.rel.includes('preconnect') || data.rel.includes('preload')) && data.name == 'href' ||
-			data.tag == 'meta' && data.name == 'content' && (data.get_attr('itemprop') == 'image' || (data.get_attr('name') || '').includes('image') || data.get_attr('name') == 'url')
+			name == 'background' ||
+			tag == 'link' && (rel.includes('alternate') || rel.includes('preconnect') || rel.includes('preload')) && name == 'href' ||
+			tag == 'meta' && name == 'content' && (wnode_getAttribute('itemprop') == 'image' || (wnode_getAttribute('name') || '').includes('image') || wnode_getAttribute('name') == 'url')
 		)return 'url';
-		else if(/^on[a-zA-Z]+$/.test(data.name))return 'js';
-		else return (this.attr_ent.find(x => (x[1][0] == '*' || x[1][0].includes(data.tag)) && x[1][1].includes(data.name))||[])[0]
+		else if(/^on[a-zA-Z]+$/.test(name))return 'js';
+		else return (this.attr_ent.find(x => (x[1][0] == '*' || x[1][0].includes(tag)) && x[1][1].includes(name))||[])[0]
 	}
-	attribute(node, name, value, meta, do_modify = true){
+	attribute(node, name, value, meta, wnode_getAttribute, wnode_setAttribute){
+		var wnode = typeof global.Node == 'function' && node instanceof global.Node ? node : new parse5_node_wrapper(node);
+		
+		wnode_setAttribute = (wnode_setAttribute || wnode.setAttribute).bind(wnode);
+		wnode_getAttribute = (wnode_getAttribute || wnode.getAttribute).bind(wnode);
+		
 		var data = {
-			attrs: typeof global.Node == 'function' && node instanceof global.Node ? node.getAttributeNames().map(name => ({ name: name, value: node.getAttribute(value) })) : node.attrs || [],
-			modified: false,
-			deleted: false,
-			modify: [],
-			name: name,
-			value: value,
-			tag: (node.tagName || '').toLowerCase(),
-			preserve_source: false, // add -rw attribute
-			get_attr(name){
-				var found = this.attrs.find(attr => attr.name && attr.name.toLowerCase() == name);
-				
-				return found ? found.value : null;
-			},
-			has_attr(name){
-				return this.attrs.some(attr => attr.name && attr.name.toLowerCase() == name);
-			},
-		};
+				name: name + '',
+				value: value + '',
+				tag: (wnode.tagName || '').toLowerCase(),
+				rel: wnode.hasAttribute('rel') ? (wnode_getAttribute('rel') || '').split(' ') : [],
+			};
 		
-		if(typeof data.name != 'string' || data.name.startsWith('data-'))return data;
+		if(data.name.startsWith('data-'))return;
 		
-		if(data.value)data.value = data.value.toString();
-		else return data;
-		
-		data.rel = data.has_attr('rel') ? (data.get_attr('rel') || '').split(' ') : [];
-		
-		data.type = this.attribute_type(data);
+		data.type = this.attribute_type(node, name);
 		
 		/*data.href = data.attrs.some(attr => attr.name == 'href');
 		
 		// rel can be set after href and cause issues
 		if(data.name == 'rel' && data.tag == 'link' && data.href)data.modify.push([ { name:	'href', value: this.url(this.unurl(data.href.value), meta, { route: this.attribute_route(Object.assign({}, data, { name: 'href' })) }) } ]);*/
 		
-		if(do_modify && typeof data.value == 'string')switch(data.type){
+		switch(data.type){
 			case'url':
 				
-				data.value = data.tag == 'link' && data.rel.includes('icon') ? '/service/favicon' : data.name == 'srcset'
+				wnode_setAttribute(data.name + '-rw', data.value);
+				
+				wnode_setAttribute(data.name, data.tag == 'link' && data.rel.includes('icon') ? '/service/favicon' : data.name == 'srcset'
 					? data.value.replace(this.regex.html.srcset, (m, url, size) => this.url(url, meta) + size)
 					: name == 'xlink:href' && data.value.startsWith('#')
 						? data.value
-						: this.url(data.value, meta, { route: this.attribute_route(data), keep_input: true });
-				
-				data.modified = true;
-				data.preserve_source = true;
+						: this.url(data.value, meta, { route: this.attribute_route(data), keep_input: true }));
 				
 				break;
 			case'del':
 				
-				data.deleted = data.modified = true;
+				wnode.removeAttribute(data.name);
 				
 				break;
 			case'css':
 				
-				data.value = this.css(data.value, meta);
-				data.modified = true;
+				wnode_setAttribute(data.name, this.css(data.value, meta));
 				
 				break;
 			case'js':
 				
-				data.value = 'return' + this.js('(()=>{' + data.value + '\n})()', meta, { inline: true });
-				data.modified = true;
+				wnode_setAttribute(data.name, 'return' + this.js('(()=>{' + data.value + '\n})()', meta, { inline: true }));
 				
 				break;
 			case'html':
 				
-				data.value = this.html(data.value, meta, { snippet: true });
-				data.modified = true;
+				wnode_setAttribute(data.name, this.html(data.value, meta, { snippet: true }));
 				
 				break;
 		}
-		
-		return data;
 	}
 	decode_blob(data){ // blob => string
 		var decoder = new TextDecoder();
