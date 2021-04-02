@@ -220,7 +220,11 @@ var rw_bundle = this && arguments.callee.caller.caller,
 			if(global.History)global.History.prototype.pushState = new Proxy(global.History.prototype.pushState, {
 				apply: (target, that, [ state, title, url = '' ]) => Reflect.apply(target, that, [ state, this.config.title, this.url(url, meta(), { route: 'html' }) ]),
 			}), global.History.prototype.replaceState = new Proxy(global.History.prototype.replaceState, {
-				apply: (target, that, [ state, title, url = '' ]) => Reflect.apply(target, that, [ state, this.config.title, this.url(url, meta(), { route: 'html' }) ]),
+				apply: (target, that, [ state, title, url = '' ]) => {
+					console.log(url);
+					
+					Reflect.apply(target, that, [ state, this.config.title, this.url(url, meta(), { route: 'html' }) ]);
+				},
 			});
 			
 			if(global.WebSocket)global.WebSocket = class extends global.WebSocket {
@@ -254,7 +258,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 						return sandbox;
 					},
 					args(method, minimum, value){
-						if(value < minimum)throw new TypeError("Failed to execute '" + method + "' on 'Storoage': " + minimum + ' argument required, but only ' + value + ' present.');
+						if(value.length < minimum)throw new TypeError("Failed to execute '" + method + "' on 'Storoage': " + minimum + ' argument required, but only ' + value.length + ' present.');
 						
 						return value;
 					},
