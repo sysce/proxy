@@ -111,7 +111,6 @@ var css = require('css-tree'),
 	};
 
 /**
-* Rewriter
 * @param {Object} [config]
 * @param {Object|String} [config.codec] Codec to use for processing URLs, can be plain, xor, base64
 * @param {String} [config.title] Page title to override with
@@ -216,9 +215,18 @@ class rewriter {
 		
 		return true;
 	}
+	/**
+	* Processes a given URL and routes it to the proxy
+	* @param {String} value - Input URL
+	* @param {Object} meta - Metadata (location, etc)
+	* @param {String} meta.base - Base when creating a url that is not proxied eg about:null, https://www.google.com
+	* @param {String} meta.origin - Proxy server origin eg https://localhost:7080
+	* @param {Object} [options]
+	* @param {Boolean} [options.ws] - If the URL should route to the websocket proxy
+	* @param {String} [options.route] - The proxy route the URL should resolve to eg js, html, css, manifest
+	* @returns {String} Processed URL
+	*/
 	url(value, meta, options = {}){
-		if(options.ws && !this.config.ws)throw new TypeError('WebSockets are disabled');
-		
 		this.validate_meta(meta);
 		
 		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
@@ -253,9 +261,6 @@ class rewriter {
 		
 		query.set('url', encodeURIComponent(this.config.codec.encode(out, meta)));
 		
-		if(meta.keep_input)query.set('raw', this.config.codec.encode(value));
-		
-		if(options.global != null)query.set('global', options.global);
 		// can be false to indicate url is to not be proxied
 		if(options.route != null)query.set('route', options.route);
 		
@@ -264,6 +269,15 @@ class rewriter {
 		
 		return (options.ws ? meta.origin.replace(this.regex.url.proto, 'ws' + (meta.origin.startsWith('https:') ? 's' : '') + '://') : '') + this.config.prefix + query;
 	}
+	/**
+	* Undos rewriting
+	* @param {String} value - Input URL
+	* @param {Object} meta - Metadata (location, etc)
+	* @param {String} meta.base - Base when creating a url that is not proxied eg about:null, https://www.google.com
+	* @param {String} meta.origin - Proxy server origin eg https://localhost:7080
+	* @param {Object} [options]
+	* @returns {String} Raw URL
+	*/
 	unurl(value, meta, options = {}){;
 		this.validate_meta(meta);
 		
@@ -273,8 +287,6 @@ class rewriter {
 		
 		if(!decoded.has('url'))return value;
 		
-		if(decoded.has('raw') && options.keep_input)return this.config.codec.decode(decoded.get('raw'), meta);
-		
 		var out = this.config.codec.decode(decoded.get('url'), options),
 			search_ind = out.indexOf('?');
 		
@@ -282,6 +294,16 @@ class rewriter {
 		
 		return out;
 	}
+	/**
+	* Rewrites JS
+	* @param {String} value - Input JS
+	* @param {Object} meta - Metadata (location, etc)
+	* @param {String} meta.base - Base when creating a url that is not proxied eg about:null, https://www.google.com
+	* @param {String} meta.origin - Proxy server origin eg https://localhost:7080
+	* @param {Object} [options]
+	* @param {Object} [options.inline] - If the JS comes from an attribute or <script> tag
+	* @returns {String} JS
+	*/
 	js(value, meta, options = {}){
 		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
 		
@@ -316,10 +338,7 @@ class rewriter {
 				callee: { type: 'Identifier', name: '$rw_set' },
 				arguments: [ node.object, clean_rw_arg(node.property) ],
 			}),
-			clean_rw_arg = node => node.type == 'Identifier' ? { type: 'Literal', value: node.name } : node,
-			asm_bodies = [],
-			_parent = Symbol(),
-			_index = Symbol();
+			clean_rw_arg = node => node.type == 'Identifier' ? { type: 'Literal', value: node.name } : node;
 		
 		iterate_est(tree).forEach(([ parent, node ]) => {
 			var replace = rnode => {	
@@ -342,8 +361,7 @@ class rewriter {
 					break;
 				case'ExpressionStatement':
 					
-					if(node.directive == 'use asm')asm_bodies.push(parent);
-					else if(is_getter(node.expression))node.expression = rw_getter(node.expression, node);
+					if(is_getter(node.expression))node.expression = rw_getter(node.expression, node);
 					
 					break;
 				case'ImportExpression':
@@ -408,6 +426,16 @@ class rewriter {
 		
 		return (options.inline ? this.encode_source(value, options) : '(typeof importScripts=="function"&&/\\[native code]\\s+}$/.test(importScripts)&&importScripts(location.origin+' + JSON.stringify(this.config.prefix) + '+' + JSON.stringify(this.config.prefix + '/main.js') + '));\n') + string;
 	}
+	/**
+	* Rewrites CSS
+	* @param {String} value - Input CSS
+	* @param {Object} meta - Metadata (location, etc)
+	* @param {String} meta.base - Base when creating a url that is not proxied eg about:null, https://www.google.com
+	* @param {String} meta.origin - Proxy server origin eg https://localhost:7080
+	* @param {Object} [options]
+	* @param {Object} [options.inline] - If the CSS comes from an attribute or <style> tag
+	* @returns {String} CSS
+	*/
 	css(value, meta, options = {}){
 		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
 		
@@ -445,24 +473,19 @@ class rewriter {
 		
 		return value;
 	}
-	uncss(value, meta, options = {}){
-		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
-		
-		this.validate_meta(meta);
-		
-		return this.decode_source(value);
-	}
-	unjs(value, meta, options = {}){
-		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
-		
-		this.validate_meta(meta);
-		
-		return this.decode_source(value);
-	}
 	encode_source(value, options){
 		return '/*RW_PRS' + module.exports.codec.base64.encode(encodeURI(options.source || value)) + 'RW_PRS*/';
 	}
-	decode_source(value){
+	/**
+	* Undos rewriting
+	* @param {String} value - Input JS/CSS
+	* @param {Object} meta - Metadata (location, etc)
+	* @param {String} meta.base - Base when creating a url that is not proxied eg about:null, https://www.google.com
+	* @param {String} meta.origin - Proxy server origin eg https://localhost:7080
+	* @param {Object} [options]
+	* @returns {String} Raw code
+	*/
+	decode_source(value, meta, options = {}){
 		var found = value;
 		
 		value.replace(/\/\*RW_PRS([A-Za-z0-9+/=]*?)RW_PRS\*\//g, (match, code) => found = decodeURI(module.exports.codec.base64.decode(code)));
@@ -486,6 +509,16 @@ class rewriter {
 			{ nodeName: 'script', tagName: 'script', attrs: [ { name: 'src', value: this.config.prefix + '/main.js' }, inject_attr ] },
 		];
 	}
+	/**
+	* Rewrites HTML
+	* @param {String} value - Input HTML
+	* @param {Object} meta - Metadata (location, etc)
+	* @param {String} meta.base - Base when creating a url that is not proxied eg about:null, https://www.google.com
+	* @param {String} meta.origin - Proxy server origin eg https://localhost:7080
+	* @param {Object} [options]
+	* @param {Boolean} [options.snippet] - Determines if code should be injected
+	* @returns {String} Processed URL
+	*/
 	html(value, meta, options = {}){
 		if(!value)return value;
 		
@@ -545,8 +578,17 @@ class rewriter {
 		
 		return parse5.serialize(parsed);
 	}
+	/**
+	* Undos HTML rewriting
+	* @param {String} value - Input HTML
+	* @param {Object} meta - Metadata (location, etc)
+	* @param {String} meta.base - Base when creating a url that is not proxied eg about:null, https://www.google.com
+	* @param {String} meta.origin - Proxy server origin eg https://localhost:7080
+	* @param {Object} [options]
+	* @returns {String} Raw HTML
+	*/
 	unhtml(value, meta, options = {}){
-		if(!value)return value;
+		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
 		
 		this.validate_meta(meta);
 		
@@ -555,8 +597,6 @@ class rewriter {
 		var parsed = parse5.parse(value), head;
 		
 		iterate_p5(parsed).forEach(([ parent, node ]) => node.attrs && node.attrs.some(attr => attr.name == 'data-rw-injected') && parent.splice(parent.indexOf(node)));
-		
-		if(!options.snippet)(head || parsed).childNodes.unshift(...this.inject_head());
 		
 		return parse5.serialize(parsed);
 	}
@@ -595,7 +635,7 @@ class rewriter {
 		
 		var type = this.attribute_type(wnode, attr, wnode_getAttribute, wnode_setAttribute);
 		
-		return value && this['un' + type] ? this['un' + type](value, meta) : value;
+		return value ? this.decode_source(value, meta) : value;
 	}
 	attribute(node, name, value, meta, wnode_getAttribute, wnode_setAttribute){
 		var wnode = typeof global.Node == 'function' && node instanceof global.Node ? node : new parse5_node_wrapper(node);
@@ -628,7 +668,7 @@ class rewriter {
 					? data.value.replace(this.regex.html.srcset, (m, url, size) => this.url(url, meta) + size)
 					: name == 'xlink:href' && data.value.startsWith('#')
 						? data.value
-						: this.url(data.value, meta, { route: this.attribute_route(data), keep_input: true }));
+						: this.url(data.value, meta, { route: this.attribute_route(data) }));
 				
 				break;
 			case'del':

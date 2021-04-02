@@ -358,7 +358,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				
 				var script_handler = desc => ({
 						get(){
-							return rewriter.unjs(desc.get.call(this) || '', meta());
+							return rewriter.decode_source(desc.get.call(this) || '', meta());
 						},
 						set(value){
 							return desc.set.call(this, rewriter.js(value || '', meta()));
@@ -366,7 +366,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 					}),
 					style_handler = desc => ({
 						get(){
-							return rewriter.uncss(desc.get.call(this) || '', meta());
+							return rewriter.decode_source(desc.get.call(this) || '', meta());
 						},
 						set(value){
 							return desc.set.call(this, rewriter.css(value || '', meta()));
