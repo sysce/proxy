@@ -18,7 +18,7 @@ server.use(nodehttp.static(path.join(__dirname, 'public'), {
 	global: {
 		rw: new rewriter({
 			prefix: '/service',
-			codec: rewriter.codec.xor,
+			// codec: rewriter.codec.xor,
 			server: server,
 			title: 'Service',
 			interface: config.interface,

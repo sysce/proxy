@@ -177,7 +177,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				apply: (target, that, [ url, opts ]) => Reflect.apply(target, that, [ this.url(new URL(url, location).href, meta()), opts ]),
 			});
 			
-			if(global.Function)global.Function =global.Function.prototype.constructor = new Proxy(global.Function, {
+			if(global.Function)global.Function = global.Function.prototype.constructor = new Proxy(global.Function, {
 				apply: (target, that, args) => rw_func(args => Reflect.apply(target, that, args), args),
 				construct: (target, args) => rw_func(args => Reflect.construct(target, args), args),
 			});

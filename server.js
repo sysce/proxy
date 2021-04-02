@@ -67,6 +67,7 @@ module.exports = class extends require('./index.js') {
 		var rewriter = super(Object.assign({
 			http_agent: null,
 			https_agent: new https.Agent({ rejectUnauthorized: false }),
+			interface: null,
 		}, config));
 		
 		if(this.config.server){
@@ -82,6 +83,7 @@ module.exports = class extends require('./index.js') {
 							prefix: this.config.prefix,
 							title: this.config.title,
 							ws: this.config.ws,
+							minify_js: this.config.minify_js,
 						}),
 					}),
 				],
@@ -161,12 +163,6 @@ module.exports = class extends require('./index.js') {
 				
 				if(ip.address.match(this.regex.url.ip))return res.error(403, 'Forbidden IP');
 				
-				await data.run(`create table if not exists "${meta.id}" (
-					domain text primary key not null,
-					value text,
-					access integer not null
-				)`);
-				
 				(url.protocol == 'http:' ? http : https).request({
 					agent: url.protocol == 'http:' ? this.config.http_agent : this.config.https_agent,
 					servername: url.hostname,
@@ -184,9 +180,7 @@ module.exports = class extends require('./index.js') {
 						route = decoded.get('route'),
 						dec_headers = await this.headers_decode(resp.headers, meta);
 					
-					res.status(resp.statusCode.toString().startsWith('50') ? 400 : resp.statusCode);
-					
-					res.set('referrer-policy', 'unsafe-url'); // soooo sus!!!
+					res.status(resp.statusCode);
 					
 					for(var name in dec_headers)res.set(name, dec_headers[name]);
 					
@@ -194,22 +188,20 @@ module.exports = class extends require('./index.js') {
 					
 					if(failure)return;
 					
-					if(decoded.get('route') != 'false' && ['js', 'css', 'html', 'manifest'].includes(route)){
+					if(['js', 'css', 'html', 'manifest'].includes(route)){
 						var body = await this.decompress(req, resp);
-						
-						if(!body.byteLength)return res.send(body);
 						
 						// console.time(route);
 						
-						var parsed = this[route](body.toString(), meta, { inline: false, global: decoded.get('global') == true, mime: content_type });
-						
-						// console.timeEnd(route);
-						
-						if(parsed instanceof Promise)parsed = await parsed.catch(err => {
+						try{
+							var parsed = await this[route](body.toString(), meta, { inline: false, global: decoded.get('global') == true, mime: content_type });
+						}catch(err){
 							console.error(err);
 							
 							return '<pre>' + nodehttp.sanitize(util.format(err)) + '</pre>';
-						});
+						}
+						
+						// console.timeEnd(route);
 						
 						res.send(parsed);
 					}else{
@@ -292,13 +284,6 @@ module.exports = class extends require('./index.js') {
 					var valid = this.valid_url(this.unurl(headers.get('referer') || headers.get('referrer') || '', meta));
 					
 					if(valid)out.origin = out.Origin = valid.origin;
-					/*
-					FIX
-					var url;
-
-					url = this.valid_url(this.config.codec.decode(this.decode_params(data.origin).get('ref'), data));
-					
-					out.Origin = url ? url.origin : this.valid_url(data.url).origin;*/
 					
 					break;
 				default:
@@ -324,6 +309,12 @@ module.exports = class extends require('./index.js') {
 			
 			switch(header.toLowerCase()){
 				case'set-cookie':
+					
+					await data.run(`create table if not exists "${meta.id}" (
+						domain text primary key not null,
+						value text,
+						access integer not null
+					)`);
 					
 					for(var ind = 0; ind < arr.length; ind++){
 						var parsed = nodehttp.cookies.parse_object(val, true);
@@ -355,6 +346,8 @@ module.exports = class extends require('./index.js') {
 					break;
 			}
 		};
+		
+		out['referrer-policy'] = 'unsafe-url'; // soooo sus!!!
 		
 		return out;
 	}

