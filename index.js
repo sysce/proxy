@@ -6,7 +6,7 @@ var css = require('css-tree'),
 	browser = typeof window != 'undefined',
 	iterate_p5 = (node, out = [ [ [ node ], 0 ] ]) => {
 		// [ parent, index ]
-		if(node.childNodes)for(var ind = 0; ind < node.childNodes.length; ind++)out.push([ node.childNodes, ind ]), iterate_p5(node.childNodes[ind], out);
+		if(node.childNodes)for(var ind = 0; ind < node.childNodes.length; ind++)out.push([ node.childNodes, node.childNodes[ind] ]), iterate_p5(node.childNodes[ind], out);
 		
 		return out;
 	},
@@ -71,17 +71,19 @@ var css = require('css-tree'),
 		appendChild(node){
 			node.parentNode = this;
 			node.remove();
+			node._removed = false;
 			this.childNodes.push(node);
 		}
 		get parentIndex(){
 			return this.parentNode ? this.parentNode.childNodes.indexOf(this) : -1;
 		}
 		remove(){
-			if(this.parentIndex == -1)return;
-			this.parentNode.childNodes.splice(this.parentIndex, 1);
+			this._removed = true;
+			/*if(this.parentIndex == -1)return;
+			this.parentNode.childNodes.splice(this.parentIndex, 1);*/
 		}
 		get textContent(){
-			return iterate_p5(this).map(([ par, ind]) => par[ind].nodeName == '#text' ? par[ind].value : null).filter(x => x).join(' ');
+			return iterate_p5(this).map(([ par, node ]) => node.nodeName == '#text' ? node.value : null).filter(x => x).join(' ');
 		}
 		set textContent(value){
 			return this.childNodes = [ { nodeName: '#text', value: value, parentNode: this } ];
@@ -386,7 +388,7 @@ module.exports = class {
 				semicolons: false
 			} });
 		}catch(err){
-			console.error(err);
+			console.error(meta, err);
 			
 			return string;
 		}
@@ -466,10 +468,30 @@ module.exports = class {
 	tick(){
 		return new Promise(resolve => process.nextTick(resolve));
 	}
-	process_node(node, meta, options){
-		var wnode = new parse5_node_wrapper(node);
+	inject_head(){
+		var inject_attr = { name: 'data-rw-injected', value: '' };
 		
-		if(node.childNodes){
+		return [
+			{ nodeName: 'link', tagName: 'link', attrs: [ { name: 'type', value: 'image/x-icon' }, { name: 'rel', value: 'shortcut icon' }, { name: 'href', value: this.config.prefix + '/favicon' },  inject_attr ] },
+			{ nodeName: 'title', tagName: 'title', childNodes: [ { nodeName: '#text', value: this.config.title } ], attrs: [  inject_attr ] },
+			{ nodeName: 'meta', tagName: 'meta', attrs: [ { name: 'name', value: 'robots' }, { name: 'content', value: 'noindex,nofollow' }, inject_attr ] },
+			{ nodeName: 'script', tagName: 'script', attrs: [ { name: 'src', value: this.config.prefix + '/main.js' }, inject_attr ] },
+		];
+	}
+	html(value, meta, options = {}){
+		if(!value)return value;
+		
+		this.validate_meta(meta);
+		
+		value = value.toString();
+		
+		var parsed = parse5.parse(value), head;
+		
+		iterate_p5(parsed).forEach(([ parent, node ]) => {
+			if(node.tagName == 'head')head = node;
+			
+			var wnode = new parse5_node_wrapper(node);
+			
 			switch(node.tagName){
 				case'title':
 					
@@ -499,31 +521,17 @@ module.exports = class {
 					if((!wnode.hasAttribute('type') || this.mime.css.includes(wnode.getAttribute('type'))) && wnode.textContent)wnode.textContent = this.css(wnode.textContent, meta, { inline: true });
 					
 					break;
+				case'meta':
+					
+					// if(wnode.hasAttribute('charset'))console.log(wnode), wnode.remove();
+					
+					break;
 			}
-		};
-		
-		wnode.getAttributeNames().forEach(name => this.attribute(node, name, wnode.getAttribute(name), meta));
-	}
-	inject_head(){
-		var inject_attr = { name: 'data-rw-injected', value: '' };
-		
-		return [
-			{ nodeName: 'link', tagName: 'link', attrs: [ { name: 'type', value: 'image/x-icon' }, { name: 'rel', value: 'shortcut icon' }, { name: 'href', value: this.config.prefix + '/favicon' },  inject_attr ] },
-			{ nodeName: 'title', tagName: 'title', childNodes: [ { nodeName: '#text', value: this.config.title } ], attrs: [  inject_attr ] },
-			{ nodeName: 'meta', tagName: 'meta', attrs: [ { name: 'name', value: 'robots' }, { name: 'content', value: 'noindex,nofollow' }, inject_attr ] },
-			{ nodeName: 'script', tagName: 'script', attrs: [ { name: 'src', value: this.config.prefix + '/main.js' }, inject_attr ] },
-		];
-	}
-	html(value, meta, options = {}){
-		if(!value)return value;
-		
-		this.validate_meta(meta);
-		
-		value = value.toString();
-		
-		var parsed = parse5.parse(value), head;
-		
-		iterate_p5(parsed).forEach(([ parent, index ], node) => (node = parent[index], node.tagName == 'head' && (head = node), this.process_node(node, meta, options)));
+			
+			wnode.getAttributeNames().forEach(name => this.attribute(node, name, wnode.getAttribute(name), meta));
+			
+			if(wnode._removed)parent.splice(parent.indexOf(node), 1);
+		});
 		
 		if(!options.snippet)(head || parsed).childNodes.unshift(...this.inject_head());
 		
@@ -538,11 +546,7 @@ module.exports = class {
 		
 		var parsed = parse5.parse(value), head;
 		
-		iterate_p5(parsed).forEach(([ parent, index ]) => {
-			var node = parent[index];
-			
-			if(node.attrs && node.attrs.some(attr => attr.name == 'data-rw-injected'))parent[index] = null;
-		});
+		iterate_p5(parsed).forEach(([ parent, node ]) => node.attrs && node.attrs.some(attr => attr.name == 'data-rw-injected') && parent.splice(parent.indexOf(node)));
 		
 		if(!options.snippet)(head || parsed).childNodes.unshift(...this.inject_head());
 		
@@ -553,7 +557,7 @@ module.exports = class {
 		else if(data.tag == 'link'){ // link tags
 			if(data.rel.includes('stylesheet'))return 'css';
 			else if(data.rel.includes('manifest'))return 'manifest';
-			else console.log(data);
+			// else console.log(data);
 		}else if(data.tag == 'script' && data.name == 'src')return 'js';
 		
 		return false;
@@ -569,7 +573,7 @@ module.exports = class {
 		
 		if(
 			name == 'background' ||
-			tag == 'link' && (rel.includes('alternate') || rel.includes('preconnect') || rel.includes('preload')) && name == 'href' ||
+			tag == 'link' && ['alternate', 'preconnect', 'preload', 'prev', 'next'].some(attr => rel.includes(attr)) && name == 'href' ||
 			tag == 'meta' && name == 'content' && (wnode_getAttribute('itemprop') == 'image' || (wnode_getAttribute('name') || '').includes('image') || wnode_getAttribute('name') == 'url')
 		)return 'url';
 		else if(/^on[a-zA-Z]+$/.test(name))return 'js';

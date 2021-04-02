@@ -136,7 +136,13 @@ module.exports = class extends require('./index.js') {
 				res.contentType('image/png').send(Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAA', 'base64'));
 			});
 			
-			this.config.server.use(this.config.prefix + '/', nodehttp.static(this.webpack.options.output.path, { listing: [ '/' ] }));
+			this.config.server.use(this.config.prefix + '/', nodehttp.static(this.webpack.options.output.path, {
+				listing: [ '/' ],
+				setHeaders(res){
+					// acorn encoding
+					res.set('content-type', res.headers.get('content-type') + ';charset=UTF-8');
+				},
+			}));
 			
 			this.config.server.all(this.config.prefix + '*', async (req, res) => {
 				var url = this.valid_url(this.unurl(req.url.href, this.empty_meta)),
