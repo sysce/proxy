@@ -253,9 +253,9 @@ module.exports = class {
 		return out;
 	}
 	iterate_est(obj, arr = []){
-		for(var prop in obj)if(typeof obj[prop] == 'object' && obj[prop] != null){
+		for(var prop in obj)if(prop != '_parent' && typeof obj[prop] == 'object' && obj[prop] != null){
 			// is a node, not array of nodes
-			if(!Array.isArray(obj[prop]) && obj[prop].type)arr.push([ obj, prop ]);
+			if(!Array.isArray(obj[prop]) && obj[prop].type)obj[prop]._parent = obj, arr.push([ obj, obj[prop] ]);
 			
 			this.iterate_est(obj[prop], arr);
 		}
@@ -303,20 +303,11 @@ module.exports = class {
 			_parent = Symbol(),
 			_index = Symbol();
 		
-		this.iterate_est(tree).forEach(([ parent, index ]) => {
-			var node = parent[index];
-			parent = node[_parent] || parent;
-			index = node[_index] || index;
-			
-			var contains = node => this.iterate_est(parent[index]).includes(node),
-				replace = node => {
-					parent[index] = node;
-					
-					for(var name in node)if(typeof node[name] == 'object' && node[name] != null && !Array.isArray(node[name])){
-						node[name][_parent] = node;
-						node[name][_index] = name;
-					}
-				};
+		this.iterate_est(tree).forEach(([ parent, node ]) => {
+			var replace = rnode => {	
+				for(var name in node._parent)if(node._parent[name] == node)node._parent[name] = rnode;
+				node = rnode;
+			};
 			
 			switch(node.type){
 				case'CallExpression':
@@ -378,7 +369,7 @@ module.exports = class {
 		});
 		
 		try{
-			var string = esotope.generate(tree, { format: {
+			var string = esotope.generate(tree/*, { format: {
 				indent: { style: '', base: 0 },
 				renumber: true,
 				hexadecimal: true,
@@ -387,7 +378,7 @@ module.exports = class {
 				compact: true,
 				parentheses: false,
 				semicolons: false
-			} });
+			} }*/);
 		}catch(err){
 			console.error(meta, err);
 			
