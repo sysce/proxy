@@ -1,5 +1,7 @@
 # SystemYA Proxy
 
+|||||
+| --- | --- | --- | --- |
 | [![Download](https://img.shields.io/npm/dw/sys-proxy?style=for-the-badge)](https://www.npmjs.com/package/sys-proxy) | [![Deploy to Heroku](https://img.shields.io/badge/depoly-heroku-purple?style=for-the-badge)](https://heroku.com/deploy?template=https://github.com/sysce/proxy) | [![Deploy to Repl.it](https://img.shields.io/badge/depoly-repl.it-171d2d?style=for-the-badge)](https://repl.it/github/sysce/proxy) | [API](./api.md) |
 
 
