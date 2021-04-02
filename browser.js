@@ -170,7 +170,11 @@ var rw_bundle = this && arguments.callee.caller.caller,
 			});
 			
 			if(global.Navigator)global.Navigator.prototype.sendBeacon = new Proxy(global.Navigator.prototype.sendBeacon, {
-				apply: (target, that, [ url, data ]) => Reflect.apply(target, that, [ this.url(new URL(url, location).href, meta(), data) ]),
+				apply: (target, that, [ url, data ]) => Reflect.apply(target, that, [ this.url(new URL(url, location).href, meta()), data ]),
+			});
+			
+			if(global.ServiceWorkerContainer)ServiceWorkerContainer.prototype.register = new Proxy(ServiceWorkerContainer.prototype.register, {
+				apply: (target, that, [ url, opts ]) => Reflect.apply(target, that, [ this.url(new URL(url, location).href, meta()), opts ]),
 			});
 			
 			if(global.Function)global.Function =global.Function.prototype.constructor = new Proxy(global.Function, {
