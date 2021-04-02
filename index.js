@@ -306,7 +306,10 @@ module.exports = class {
 		this.iterate_est(tree).forEach(([ parent, node ]) => {
 			var replace = rnode => {	
 				for(var name in node._parent)if(node._parent[name] == node)node._parent[name] = rnode;
-				node = rnode;
+				
+				for(var prop in rnode)if(!Array.isArray(rnode[prop]) && rnode[prop] != null && typeof rnode[prop] == 'object')rnode[prop]._parent = rnode;
+				
+				return node = rnode;
 			};
 			
 			switch(node.type){

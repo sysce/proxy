@@ -512,3 +512,5 @@ var rw_bundle = this && arguments.callee.caller.caller,
 };
 
 new _rewriter(inject_config).exec_globals();
+
+if(typeof document == 'object' && document.currentScript)document.currentScript.remove()
