@@ -76,11 +76,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 						return Reflect.construct(target, args);
 					},
 					apply(target, that, args){
-						try{
-							return Reflect.apply(target, that == obj_prox ? obj : that, args);
-						}catch(err){
-							console.log(obj_prox);
-						}
+						Reflect.apply(target, that == obj_prox ? obj : that, args);
 					},
 					get(target, prop){
 						var ret = Reflect.get(target, prop);
@@ -122,7 +118,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				rw_func = (construct, args) => {
 					var decoy = construct(args),
 						script = args.splice(-1)[0],
-						proxied = construct([ ...args, 'return(' + this.js('()=>{' + script + '\n}', meta(), { inline: true }).slice(0, -1) + ')()' ]);
+						proxied = construct([ ...args, 'return' + this.js('(()=>{' + script + '\n})()', meta(), { source: script, inline: true }) ]);
 					
 					defineProperty(proxied, 'length', { get: _ => decoy.length, set: _ => _ });
 					proxied.toString = Function.prototype.toString.bind(decoy);

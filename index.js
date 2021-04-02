@@ -2,7 +2,7 @@
 var css = require('css-tree'),
 	parse5 = require('parse5'),
 	acorn = require('acorn-hammerhead'),
-	esotope = require('esotope-hammerhead'),
+	esotope = require('./esotope'),
 	browser = typeof window != 'undefined',
 	iterate_p5 = (node, out = [ [ [ node ], 0 ] ]) => {
 		// [ parent, index ]
@@ -99,6 +99,7 @@ var css = require('css-tree'),
 			return this.data.parentNode;
 		}
 	};
+
 
 module.exports = class {
 	constructor(config){
