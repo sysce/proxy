@@ -189,8 +189,6 @@ module.exports = class extends require('./index.js') {
 						
 						if(!body.byteLength)return res.send(body);
 						
-						if(this[route + '_async'])route += '_async';
-						
 						// console.time(route);
 						
 						var parsed = this[route](body.toString(), meta, { inline: false, global: decoded.get('global') == true, mime: content_type });
