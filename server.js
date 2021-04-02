@@ -145,8 +145,11 @@ module.exports = class extends require('./index.js') {
 			}));
 			
 			this.config.server.all(this.config.prefix + '*', async (req, res) => {
-				var url = this.valid_url(this.unurl(req.url.href, this.empty_meta)),
-					meta = { url: url, origin: req.url.origin, base: url.origin, id: req.meta_id },
+				var url = this.valid_url(this.unurl(req.url.href, this.empty_meta));
+				
+				if(!url)return;
+				
+				var meta = { url: url, origin: req.url.origin, base: url.href, id: req.meta_id },
 					failure,
 					timeout = setTimeout(() => !res.body_sent && (failure = true, res.error(500, 'Timeout')), this.config.timeout);
 				
@@ -163,7 +166,6 @@ module.exports = class extends require('./index.js') {
 					value text,
 					access integer not null
 				)`);
-
 				
 				(url.protocol == 'http:' ? http : https).request({
 					agent: url.protocol == 'http:' ? this.config.http_agent : this.config.https_agent,
@@ -183,6 +185,8 @@ module.exports = class extends require('./index.js') {
 						dec_headers = await this.headers_decode(resp.headers, meta);
 					
 					res.status(resp.statusCode.toString().startsWith('50') ? 400 : resp.statusCode);
+					
+					res.set('referrer-policy', 'unsafe-url'); // soooo sus!!!
 					
 					for(var name in dec_headers)res.set(name, dec_headers[name]);
 					
@@ -232,7 +236,7 @@ module.exports = class extends require('./index.js') {
 				var req_url = new this.URL(req.url, new this.URL('wss://' + req.headers.host)),
 					url = this.unurl(req_url.href, this.empty_meta),
 					cookies = nodehttp.cookies.parse_object(req.headers.cookie),
-					meta = { url: url, origin: req_url, base: url, id: cookies.proxy_id };
+					meta = { url: url, origin: req_url.origin, base: url, id: cookies.proxy_id };
 				
 				if(!url)return cli.close();
 				
@@ -246,13 +250,7 @@ module.exports = class extends require('./index.js') {
 				
 				srv.on('error', err => console.error(headers, url.href, util.format(err)) + cli.close());
 				
-				cli.on('message', data => {
-					clearTimeout(timeout);
-					
-					timeout = setTimeout(() => srv.close(), time);
-					
-					if(srv.readyState == WebSocket.OPEN)srv.send(data);
-				});
+				cli.on('message', data => srv.readyState == WebSocket.OPEN && srv.send(data));
 				
 				cli.on('close', code => (srv.readyState == WebSocket.OPEN && srv.close()));
 				
@@ -266,7 +264,7 @@ module.exports = class extends require('./index.js') {
 			});
 		}
 	}
-	async headers_encode(value, meta){
+	async headers_encode(headers, meta){
 		// prepare headers to be sent to a request url (eg google.com)
 		
 		// meta.id is hex, has no quotes so it can be wrapped in ""
@@ -275,17 +273,14 @@ module.exports = class extends require('./index.js') {
 		
 		out.cookie = existing.map(data => data.value).join(' ');
 		
-		value.forEach((value, header) => {
-			// val = typeof value[header] == 'object' ? value[header].join('') : value[header];
-			
+		headers.forEach((value, header) => {
 			switch(header.toLowerCase()){
-				/*case'referrer':
+				case'referrer':
 				case'referer':
 					
-					// FIX
-					out[header] = meta.origin.searchParams.has('ref') ? this.config.codec.decode(meta.origin.searchParams.get('ref'), meta) : this.valid_url(meta.url).href;
+					out[header] = this.unurl(value, meta);
 					
-					break;*/
+					break;
 				case'host':
 					
 					out[header] = new this.URL(meta.url).host;
@@ -294,6 +289,9 @@ module.exports = class extends require('./index.js') {
 				case'cookie': case'sec-websocket-key': break;
 				case'origin':
 					
+					var valid = this.valid_url(this.unurl(headers.get('referer') || headers.get('referrer') || '', meta));
+					
+					if(valid)out.origin = out.Origin = valid.origin;
 					/*
 					FIX
 					var url;

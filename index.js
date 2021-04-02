@@ -164,7 +164,7 @@ module.exports = class {
 			css_keys: [ 'background', 'background-image', 'src' ],
 			url: [ [ 'track', 'template', 'source', 'script', 'object', 'media', 'link', 'input', 'image', 'video', 'iframe', 'frame', 'form', 'embed', 'base', 'area', 'anchor', 'a', 'img', 'use' ], [ 'srcset', 'href', 'xlink:href', 'src', 'action', 'content', 'data', 'poster' ] ],
 			// js attrs begin with on
-			del: [ '*', ['nonce', 'integrity'] ],
+			del: [ '*', [ 'nonce', 'integrity', 'referrerpolicy' ] ],
 		};
 		
 		this.attr_ent = Object.entries(this.attr);
@@ -230,7 +230,7 @@ module.exports = class {
 		if(options.route != null)query.set('route', options.route);
 		
 		// referer
-		query.set('ref', this.config.codec.encode(meta.base, meta));
+		// query.set('ref', this.config.codec.encode(meta.base, meta));
 		
 		return (options.ws ? meta.origin.replace(this.regex.url.proto, 'ws' + (meta.origin.startsWith('https:') ? 's' : '') + '://') : '') + this.config.prefix + query;
 	}
@@ -402,7 +402,7 @@ module.exports = class {
 		this.validate_meta(meta);
 		
 		try{
-			var tree = css.parse(value),
+			var tree = css.parse(options.inline ? 'x{' + value + '}' : value),
 				read_string = str => {
 					if(["'", '"'].includes(str[0])){
 						var quote = str[0];
@@ -411,23 +411,21 @@ module.exports = class {
 					}
 					
 					return str;
+				},
+				walk_url = (node, route) => {
+					if(node.type == 'String' && !node.rewritten)node.rewritten = true, node.value = JSON.stringify(this.url(read_string(node.value), meta, { route: route }));
+					else if(node.type == 'Raw')node.rewritten = true, node.value = JSON.stringify(this.url(node.value, meta, { route: route }));
 				};
 			
 			css.walk(tree, node => {
-				if(node.name == 'import')css.walk(node, snode => {
-					if(snode.type == 'String' && !snode.rewritten)snode.rewritten = true, snode.value = JSON.stringify(this.url(read_string(snode.value), meta, { route: 'css' }));
-				});
-				else if(node.type == 'Url'){
-					css.walk(node, snode => {
-						if(snode.rewritten || snode.type != 'String')return;
-						
-						snode.rewritten = true;
-						snode.value = JSON.stringify(this.url(read_string(snode.value), meta));
-					});
-				}
+				
+				if(node.name == 'import')css.walk(node, node => walk_url(node, 'css'));
+				else if(node.type == 'Url' && node.value && !node.value.rewritten)css.walk(node, walk_url);
 			});
 			
-			return css.generate(tree) + (options.inline ? this.encode_source(value, options) : '');
+			var formatted = css.generate(tree);
+			
+			return options.inline ? formatted.slice(2, -1) + this.encode_source(value, options) : formatted;
 		}catch(err){
 			console.error(err);
 			return value;
@@ -450,12 +448,12 @@ module.exports = class {
 		return this.decode_source(value);
 	}
 	encode_source(value, options){
-		return '/*RW_PRS' + module.exports.codec.base64.encode(encodeURIComponent(options.source || value)) + 'RW_PRS*/';
+		return '/*RW_PRS' + module.exports.codec.base64.encode(encodeURI(options.source || value)) + 'RW_PRS*/';
 	}
 	decode_source(value){
 		var found = value;
 		
-		value.replace(/\/\*RW_PRS([A-Za-z0-9+/=]*?)RW_PRS\*\//g, (match, code) => found = decodeURIComponent(module.exports.codec.base64.decode(code)));
+		value.replace(/\/\*RW_PRS([A-Za-z0-9+/=]*?)RW_PRS\*\//g, (match, code) => found = decodeURI(module.exports.codec.base64.decode(code)));
 		
 		return found;
 	}
@@ -501,7 +499,7 @@ module.exports = class {
 					break;
 				case'base':
 				
-					var href = node.getAttribute('href');
+					var href = wnode.getAttribute('href');
 					
 					if(href){
 						var valid = this.valid_url(href.value, meta.base);
@@ -519,7 +517,7 @@ module.exports = class {
 					break;
 				case'style':
 					
-					if((!wnode.hasAttribute('type') || this.mime.css.includes(wnode.getAttribute('type'))) && wnode.textContent)wnode.textContent = this.css(wnode.textContent, meta, { inline: true });
+					if((!wnode.hasAttribute('type') || this.mime.css.includes(wnode.getAttribute('type'))) && wnode.textContent)wnode.textContent = this.css(wnode.textContent, meta);
 					
 					break;
 				case'meta':
@@ -580,6 +578,16 @@ module.exports = class {
 		else if(/^on[a-zA-Z]+$/.test(name))return 'js';
 		else return (this.attr_ent.find(x => (x[1][0] == '*' || x[1][0].includes(tag)) && x[1][1].includes(name))||[])[0]
 	}
+	unattribute(node, attr, value, meta, wnode_getAttribute, wnode_setAttribute){
+		var wnode = typeof global.Node == 'function' && node instanceof global.Node ? node : new parse5_node_wrapper(node);
+		
+		wnode_setAttribute = (wnode_setAttribute || wnode.setAttribute).bind(wnode);
+		wnode_getAttribute = (wnode_getAttribute || wnode.getAttribute).bind(wnode);
+		
+		var type = this.attribute_type(wnode, attr, wnode_getAttribute, wnode_setAttribute);
+		
+		return value && this['un' + type] ? this['un' + type](value, meta) : value;
+	}
 	attribute(node, name, value, meta, wnode_getAttribute, wnode_setAttribute){
 		var wnode = typeof global.Node == 'function' && node instanceof global.Node ? node : new parse5_node_wrapper(node);
 		
@@ -636,6 +644,11 @@ module.exports = class {
 			case'html':
 				
 				wnode_setAttribute(data.name, this.html(data.value, meta, { snippet: true }));
+				
+				break;
+			default:
+			
+				wnode_setAttribute(data.name, data.value);
 				
 				break;
 		}
@@ -711,7 +724,7 @@ module.exports.codec = {
 		encode(str){
 			if(!str || typeof str != 'string')return str;
 			
-			var b64chs = Array.from('ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/='),
+			var b64chs = ['A','B','C','D','E','F','G','H','I','J','K','L','M','N','O','P','Q','R','S','T','U','V','W','X','Y','Z','a','b','c','d','e','f','g','h','i','j','k','l','m','n','o','p','q','r','s','t','u','v','w','x','y','z','0','1','2','3','4','5','6','7','8','9','+','/','='],
 				u32, c0, c1, c2, asc = '',
 				pad = str.length % 3;
 			

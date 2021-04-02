@@ -3,7 +3,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 	_rewriter = class extends require('./index.js') {
 	
 	hook_frame(node){
-		if(!node.src)node.contentWindow.rw_bundle = rw_bundle, new node.contentWindow.Function('(' + rw_bundle + ')()')();
+		if(!node.src && node.contentWindow)node.contentWindow.rw_bundle = rw_bundle, new node.contentWindow.Function('(' + rw_bundle + ')()')();
 	}
 	exec_globals(){
 		if(typeof $rw_get == 'undefined'){
@@ -76,7 +76,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 						return Reflect.construct(target, args);
 					},
 					apply(target, that, args){
-						Reflect.apply(target, that == obj_prox ? obj : that, args);
+						return Reflect.apply(target, typeof that == 'undefined' || that == obj_prox ? obj : that, args);
 					},
 					get(target, prop){
 						var ret = Reflect.get(target, prop);
@@ -87,13 +87,14 @@ var rw_bundle = this && arguments.callee.caller.caller,
 						return Reflect.set(target, prop, value);
 					},
 				}),
-				rw_global_eval = script => eval(rw_eval(script)),
+				glob_evals = new Map(),
 				rw_url = url => this.url(url, meta()),
 				rw_get = (object, property, bound) => {
 					var ret = object[property];
 					
 					// rw_get(parent, 'eval') 😶
-					if(typeof ret == 'function' && ret.name == 'eval' && object == global)ret = rw_global_eval;
+					
+					if(typeof ret == 'function' && /eval\(\) {\s+\[native code]\s+}$/.test(ret))return glob_evals.has(ret) ? glob_evals.get(ret) : (glob_evals.set(ret, script => ret(rw_eval(script))), glob_evals.get(ret));
 					
 					var out = rw_proxy(ret);
 					
@@ -344,12 +345,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				})).observe(document, { childList: true, attributes: true, subtree: true });
 				
 				global.Element.prototype.getAttribute = new Proxy(global.Element.prototype.getAttribute, {
-					apply: (target, that, [ attr ]) => {
-						var value = Reflect.apply(target, that, [ attr ]),
-							type = this.attribute_type(that, attr, getAttribute, setAttribute);
-						
-						return value && this['un' + type] ? this['un' + type](value, meta()) : value;
-					},
+					apply: (target, that, [ attr ]) => this.unattribute(that, attr, Reflect.apply(target, that, [ attr ]), meta(), getAttribute, setAttribute),
 				});
 				
 				global.Element.prototype.setAttribute = new Proxy(global.Element.prototype.setAttribute, {
