@@ -320,7 +320,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 					get: (target, prop, ret) => {
 						var sandbox = storage_sandbox.get(target);
 						
-						return typeof (ret = Reflect.get(target, prop)) == 'function' ? ret : sandbox[prop]
+						return typeof sandbox[prop] == 'undefined' ? Reflect.get(target, prop) : sandbox[prop]
 					},
 					set: (target, prop, value) => {
 						var proto = getPrototypeOf(target),
