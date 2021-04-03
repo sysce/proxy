@@ -65,10 +65,17 @@ var rw_bundle = this && arguments.callee.caller.caller,
 					
 					return location;
 				},
-				rw_proxy = object => {
+				is_location = object => {
 					var proto = object != null && typeof object == 'object' && getPrototypeOf(object);
 					
-					if(proto && ['[object Location]', '[object WorkerLocation]'].includes(toString(proto)))return wrapped_locations.get(object) || wrapped_location(object);
+					try{
+						return proto && ['[object Location]', '[object WorkerLocation]'].includes(toString(proto));
+					}catch(err){
+						return false;
+					}
+				},
+				rw_proxy = object => {
+					if(is_location(object))return wrapped_locations.get(object) || wrapped_location(object);
 					return object;
 				},
 				bind_proxy = (obj, obj_prox, func, prox) => prox = new Proxy(func, {
@@ -104,10 +111,8 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				},
 				rw_set = (object, property) => {
 					return {
-						set val(value){
-							var target = Reflect.get(object, property);
-							
-							if(target instanceof Location)return rw_proxy(target).href = value;
+						set _(value){
+							if(is_location(value))return rw_proxy(object).href = value;
 							
 							return Reflect.set(object, property, value);
 						},
@@ -130,9 +135,12 @@ var rw_bundle = this && arguments.callee.caller.caller,
 			this.createObjectURL = URL.createObjectURL;
 			this.revokeObjectURL = URL.revokeObjectURL;
 			
-			global.$rw_get = rw_get;
-			global.$rw_get_global = (property, bound) => rw_get(global, property, bound);
-			global.$rw_set = rw_set;
+			global.rw$g = rw_get;
+			global.rw$gg = object => is_location(object) ? rw_proxy(object) : object;
+			global.rw$s = rw_set;
+			global.rw$gs = set => {
+				
+			};
 			global.$rw_proxy = rw_proxy;
 			global.$rw_eval = rw_eval;
 			global.$rw_url = rw_url;
@@ -309,13 +317,20 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				};
 				
 				defineProperties(global, fromEntries(storage_sandbox.instances.filter(storage => typeof global[storage] == 'object').map((storage, prox) => (storage_sandbox.proxies.set(prox = new Proxy(global[storage], {
-					get: (target, prop, ret) => typeof (ret = Reflect.get(target, prop)) == 'function' ? ret : typeof ret == 'string' ? storage_sandbox.get(target)[item] : ret,
+					get: (target, prop, ret) => {
+						var sandbox = storage_sandbox.get(target);
+						
+						return typeof (ret = Reflect.get(target, prop)) == 'function' ? ret : sandbox[prop]
+					},
 					set: (target, prop, value) => {
 						var proto = getPrototypeOf(target),
 							sandbox = storage_sandbox.get(target);
 						
 						return target.hasOwnProperty(prop) ? Reflect.set(target, prop, value) : (sandbox[prop] = value += '', sandbox[storage_sandbox.sync]());
 					},
+					has: (target, prop) => Reflect.has(target, prop) || typeof storage_sandbox.get(target)[prop] != 'undefined',
+					ownKeys: target => keys(storage_sandbox.get(target)),
+					
 				}), global[storage]), [ storage, {
 					get: _ => prox,
 					configurable: true,

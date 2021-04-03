@@ -12,18 +12,49 @@ var fs = require('fs'),
 			cert: fs.readFileSync(path.join(__dirname, 'ssl.crt'), 'utf8'),
 		} : false,
 		log_ready: true,
+	}),
+	rw = new rewriter({
+		prefix: '/service',
+		// codec: rewriter.codec.xor,
+		server: server,
+		title: 'Service',
+		interface: config.interface,
 	});
 
 server.use(nodehttp.static(path.join(__dirname, 'public'), {
 	global: {
-		rw: new rewriter({
-			prefix: '/service',
-			// codec: rewriter.codec.xor,
-			server: server,
-			title: 'Service',
-			interface: config.interface,
-		}),
+		rw: rw,
 	},
 }));
+
+console.log(rw.js(`
+test["sus" + 100]++;
+console.log(window["locatio" + "n"].href);
+window["locatio" + "n"] = "/";
+location = "sus!!";
+window[c] = "test";
+window.ex = "test";
+
+console.log(window[c]);
+console.log(window.c);
+
+location = sus;
+
+location;
+
+test.location;
+
+let location = Symbol();
+
+console.log([ location ][0] == location);
+
+window.location;
+console.log(window[location]); // null
+console.log(({ [location]: {} })[location]); // {}
+
+console.log(window[location]());
+
+var test = { location: "sus" };
+`, { base: 'about:null', origin: 'about:null' }));
 
 server.alias('/gateway', '/gateway.php');

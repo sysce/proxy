@@ -11,11 +11,12 @@ var css = require('css-tree'),
 		return out;
 	},
 	iterate_est = (obj, arr = []) => {
-		for(var prop in obj)if(prop != '_parent' && typeof obj[prop] == 'object' && obj[prop] != null){
-			// is a node, not array of nodes
-			if(!Array.isArray(obj[prop]) && obj[prop].type)obj[prop]._parent = obj, arr.push([ obj, obj[prop] ]);
+		for(var prop in obj)if(prop != 'parent' && typeof obj[prop] == 'object' && obj[prop] != null){
+			obj[prop].parent = obj;
 			
-			this.iterate_est(obj[prop], arr);
+			if(!Array.isArray(obj[prop]) && obj[prop].type)arr.push([ obj, obj[prop] ]);
+			
+			iterate_est(obj[prop], arr);
 		}
 		
 		return arr;
@@ -320,35 +321,23 @@ class rewriter {
 			return value;
 		};
 		
-		var is_getter = node => node.name == 'location' || node.value == 'location',
-			// checks if expression can be predicted
-			exact = node => [ 'Literal', 'Identifier', 'MemberExpression', 'Super' ].includes(node.type) && !is_getter(node),
-			bound_get = node => node.type == 'CallExpression' ? { type: 'Literal', value: true, raw: true } : { type: 'Literal', value: false, raw: false },
-			rw_getter = (node, parent) => node.object ? {
-				type: 'CallExpression',
-				callee: { type: 'Identifier', name: '$rw_get' },
-				arguments: [ node.object, clean_rw_arg(node.property), bound_get(parent) ],
-			} : {
-				type: 'CallExpression',
-				callee: { type: 'Identifier', name: '$rw_get_global' },
-				arguments: [ clean_rw_arg(node), bound_get(parent) ],
+		var index = node => {
+				for(var name in node.parent)if(node.parent[name] == node)return name;
 			},
-			rw_setter = node => ({
-				type:'CallExpression',
-				callee: { type: 'Identifier', name: '$rw_set' },
-				arguments: [ node.object, clean_rw_arg(node.property) ],
-			}),
-			clean_rw_arg = node => node.type == 'Identifier' ? { type: 'Literal', value: node.name } : node;
+			replace = (node, newnode) => {	
+				for(var name in node.parent)if(node.parent[name] == node)node.parent[name] = newnode;
+				
+				for(var prop in newnode)if(!Array.isArray(newnode[prop]) && newnode[prop] != null && typeof newnode[prop] == 'object')newnode[prop].parent = newnode;
+				
+				return newnode;
+			},
+			rw_url = (...args) => ({
+				type: 'CallExpression',
+				callee: { type: 'Identifier', name: '$rw_url' },
+				arguments: args,
+			});
 		
 		iterate_est(tree).forEach(([ parent, node ]) => {
-			var replace = rnode => {	
-				for(var name in node._parent)if(node._parent[name] == node)node._parent[name] = rnode;
-				
-				for(var prop in rnode)if(!Array.isArray(rnode[prop]) && rnode[prop] != null && typeof rnode[prop] == 'object')rnode[prop]._parent = rnode;
-				
-				return node = rnode;
-			};
-			
 			switch(node.type){
 				case'CallExpression':
 					
@@ -359,18 +348,9 @@ class rewriter {
 					}];
 					
 					break;
-				case'ExpressionStatement':
-					
-					if(is_getter(node.expression))node.expression = rw_getter(node.expression, node);
-					
-					break;
 				case'ImportExpression':
 					
-					node.source = {
-						type: 'CallExpression',
-						callee: { type: 'Identifier', name: '$rw_url' },
-						arguments: [ node.source ],
-					};
+					node.source = rw_url(node.source);
 					
 					break;
 				case'ImportDeclaration':
@@ -378,37 +358,74 @@ class rewriter {
 					node.source.raw = JSON.stringify(this.url(node.source.value, meta, { route: 'js' }));
 					
 					break;
-				case'AssignmentExpression':
+				case'Identifier':
 					
-					// note: "why is node.left.type == 'MemberExpression' && " here? thought it is checked in exact
-					if(node.left.type == 'MemberExpression' && !exact(node.left.property))node = replace({
-						type: 'AssignmentExpression',
-						operator: node.operator,
-						left: {
+					var type = (node.parent || {}).type;
+					
+					if(node.name == 'location' && (!node.parent || node.parent.type == 'Property' ? node.parent.computed : index(node.parent) != 'params')){
+						if(['UpdateExpression', 'AssignmentExpression'].includes(type))replace(node, {
 							type: 'MemberExpression',
-							object: rw_setter(node.left),
-							property: { type: 'Identifier', name: 'val' },
-						},
-						right: node.right,
-					});
-					
-					break;
-				case'UpdateExpression':
-					
-					if(!exact(node.argument))node.argument = rw_setter(node.argument);
+							object: {
+								type: 'CallExpression',
+								callee: { type: 'Identifier', name: 'rw$gs' },
+								arguments: [ node ],
+							},
+							property: { type: 'Identifier', name: '_' },
+						});
+						// argument, property, etc just not object.prop.location
+						else if(type != 'MemberExpression')replace(node, {
+							type: 'CallExpression',
+							callee: { type: 'Identifier', name: 'rw$gg' },
+							arguments: [ node ],
+						});
+					}
 					
 					break;
 				case'MemberExpression':
 					
-					if(!exact(node.property))replace(rw_getter(node, parent));
-					else if(is_getter(node.object))node.object = rw_getter(node.object, node);
+					var setting = ['UpdateExpression', 'AssignmentExpression'].includes((node.parent || {}).type) && ['argument', 'left'].includes(index(node)),
+						bound = node.parent && node.parent.type == 'CallExpression' ? { type: 'Literal', value: true } : [];
+					
+					if(node.computed)replace(node, setting ? {
+						type: 'MemberExpression',
+						object: {
+							type: 'CallExpression',
+							callee: { type: 'Identifier', name: 'rw$s' },
+							arguments: [ node.object, node.property ].concat(bound),
+						},
+						property: { type: 'Identifier', name: '_' },
+					} : {
+						type: 'CallExpression',
+						callee: { type: 'Identifier', name: 'rw$g' },
+						arguments: [ node.object, node.property ].concat(bound),
+					});
+					else if(node.property.name == 'location')replace(node, setting ? {
+						type: 'MemberExpression',
+						object: {
+							type: 'CallExpression',
+							callee: { type: 'Identifier', name: 'rw$s' },
+							arguments: [ node.object, { type: 'Literal', value: 'location' } ],
+						},
+						property: { type: 'Identifier', name: '_' },
+					} : {
+						type: 'CallExpression',
+						callee: { type: 'Identifier', name: 'rw$g' },
+						arguments: [ node.object, { type: 'Literal', value: 'location' } ],
+					});
+					
+					/*if(node.property.value == 'location'){
+						replace(node, ['UpdateExpression', 'AssignmentExpression'].includes(node.parent) ? rw_set(node) : {
+							
+						});
+					}*/
+					// console.log(node.property);
 					
 					break;
 			}
 		});
 		
 		try{
-			var string = esotope.generate(tree, { format: {
+			var string = esotope.generate(tree/*, { format: {
 				indent: { style: '', base: 0 },
 				renumber: true,
 				hexadecimal: true,
@@ -417,7 +434,7 @@ class rewriter {
 				compact: true,
 				parentheses: false,
 				semicolons: false
-			} });
+			} }*/);
 		}catch(err){
 			console.error(meta, err);
 			
@@ -635,7 +652,7 @@ class rewriter {
 		
 		var type = this.attribute_type(wnode, attr, wnode_getAttribute, wnode_setAttribute);
 		
-		return value ? this.decode_source(value, meta) : value;
+		return wnode.hasAttribute(attr + '-rw') ? wnode.getAttribute(attr + '-rw') : value ? this.decode_source(value, meta) : value;
 	}
 	attribute(node, name, value, meta, wnode_getAttribute, wnode_setAttribute){
 		var wnode = typeof global.Node == 'function' && node instanceof global.Node ? node : new parse5_node_wrapper(node);
@@ -673,15 +690,21 @@ class rewriter {
 				break;
 			case'del':
 				
+				wnode_setAttribute(data.name + '-rw', data.value);
+				
 				wnode.removeAttribute(data.name);
 				
 				break;
 			case'css':
 				
+				wnode_setAttribute(data.name + '-rw', data.value);
+				
 				wnode_setAttribute(data.name, this.css(data.value, meta, { inline: true }));
 				
 				break;
 			case'js':
+				
+				wnode_setAttribute(data.name + '-rw', data.value);
 				
 				try{
 					wnode_setAttribute(data.name, 'return' + this.js('(()=>{' + data.value + '\n})()', meta, { inline: true, source: data.value }));
@@ -691,6 +714,8 @@ class rewriter {
 				
 				break;
 			case'html':
+				
+				wnode_setAttribute(data.name + '-rw', data.value);
 				
 				wnode_setAttribute(data.name, this.html(data.value, meta, { snippet: true }));
 				
