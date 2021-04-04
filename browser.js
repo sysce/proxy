@@ -3,10 +3,10 @@ var rw_bundle = this && arguments.callee.caller.caller,
 	_rewriter = class extends require('./index.js') {
 	
 	hook_frame(node){
-		if(!node.src && node.contentWindow)node.contentWindow.rw_bundle = rw_bundle, new node.contentWindow.Function('(' + rw_bundle + ')()')();
+		if(!node.src && node.contentWindow)new node.contentWindow.Function('(' + rw_bundle + ')()')();
 	}
 	exec_globals(){
-		if(typeof $rw_get == 'undefined'){
+		if(typeof rw$g == 'undefined'){
 			var rewriter = this,
 				Location = global.WorkerLocation || global.Location,
 				location = global.location,
@@ -138,10 +138,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 			global.rw$g = rw_get;
 			global.rw$gg = object => is_location(object) ? rw_proxy(object) : object;
 			global.rw$s = rw_set;
-			global.rw$gs = set => {
-				
-			};
-			global.$rw_proxy = rw_proxy;
+			global.rw$gs = prop => rw_set(global, prop);
 			global.$rw_eval = rw_eval;
 			global.$rw_url = rw_url;
 			
@@ -250,7 +247,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 			var get_sandbox_host = () => new URL(meta().base).hostname;
 			
 			if(global.Storage){
-				var storage_sandbox = {
+				var stor = {
 					instances: [ 'localStorage', 'sessionStorage' ],
 					sync: Symbol(),
 					get_item: global.Storage.prototype.getItem,
@@ -261,7 +258,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 						
 						var sandbox = setPrototypeOf(JSON.parse(this.get_item.call(storage, get_sandbox_host()) || '{}'), null);
 						
-						sandbox[storage_sandbox.sync] = () => this.set_item.call(storage, get_sandbox_host(), JSON.stringify(sandbox));
+						sandbox[stor.sync] = (obj = sandbox) => this.set_item.call(storage, get_sandbox_host(), JSON.stringify(obj));
 						
 						return sandbox;
 					},
@@ -274,63 +271,71 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				
 				Object.defineProperty(global.Storage.prototype, 'length', {
 					get(){
-						return keys(storage_sandbox.get(this)).length;
+						return keys(stor.get(this)).length;
 					},
 				});
 				
 				global.Storage.prototype.key = function(...args){
-					var [ index ] = storage_sandbox.args('key', 1, args);
+					var [ index ] = stor.args('key', 1, args);
 					
-					return keys(storage_sandbox.get(this))[index];
+					return keys(stor.get(this))[index];
 				};
 				
 				global.Storage.prototype.clear = function(){
-					storage_sandbox.get(this)[storage_sandbox.sync]({});
+					stor.get(this)[stor.sync]({});
 				};
 				
 				global.Storage.prototype.removeItem = function(...args){
-					var [ item ] = storage_sandbox.args('removeItem', 1, args),
-						sandbox = storage_sandbox.get(this);
+					var [ item ] = stor.args('removeItem', 1, args),
+						sandbox = stor.get(this);
 					
 					delete sandbox[item];
 					
-					sandbox[storage_sandbox.sync]();
-				};
-				
-				global.Storage.prototype.hasOwnProperty = function(item){
-					return !hasOwnProperty.call(this, item) && typeof storage_sandbox.get(this)[item] != 'undefined';
+					sandbox[stor.sync]();
 				};
 				
 				global.Storage.prototype.getItem = function(...args){
-					var [ item ] = storage_sandbox.args('getItem', 1, args);
+					var [ item ] = stor.args('getItem', 1, args),
+						value = stor.get(this)[item];
 					
-					return storage_sandbox.get(this)[item];
+					return typeof value != 'string' ? null : storage[item];
 				};
 				
 				global.Storage.prototype.setItem = function(...args){
-					var [ item, value ] = storage_sandbox.args('setItem', 2, args),
-						sandbox = storage_sandbox.get(this);
+					var [ item, value ] = stor.args('setItem', 2, args),
+						sandbox = stor.get(this);
 					
 					sandbox[item] = value + '';
 					
-					sandbox[storage_sandbox.sync]();
+					sandbox[stor.sync]();
 				};
 				
-				defineProperties(global, fromEntries(storage_sandbox.instances.filter(storage => typeof global[storage] == 'object').map((storage, prox) => (storage_sandbox.proxies.set(prox = new Proxy(global[storage], {
-					get: (target, prop, ret) => {
-						var sandbox = storage_sandbox.get(target);
+				defineProperties(global, fromEntries(stor.instances.filter(storage => typeof global[storage] == 'object').map((storage, prox) => (stor.proxies.set(prox = new Proxy(global[storage], {
+					get(target, item, ret){
+						var sandbox = stor.get(target);
 						
-						return typeof sandbox[prop] == 'undefined' ? Reflect.get(target, prop) : sandbox[prop]
+						return item in target ? target[item] : sandbox[item]
 					},
-					set: (target, prop, value) => {
+					set(target, item, value){
 						var proto = getPrototypeOf(target),
-							sandbox = storage_sandbox.get(target);
+							sandbox = stor.get(target);
 						
-						return target.hasOwnProperty(prop) ? Reflect.set(target, prop, value) : (sandbox[prop] = value += '', sandbox[storage_sandbox.sync]());
+						return target.hasOwnProperty(item) ? Reflect.set(target, item, value) : (sandbox[item] = value += '', sandbox[stor.sync]());
 					},
-					has: (target, prop) => Reflect.has(target, prop) || typeof storage_sandbox.get(target)[prop] != 'undefined',
-					ownKeys: target => keys(storage_sandbox.get(target)),
-					
+					deleteProperty(target, item){
+						var sandbox = stor.get(target);
+						
+						delete sandbox[item];
+						
+						sandbox[stor.sync]();
+					},
+					getOwnPropertyDescriptor(target, item){
+						var storage = stor.get(target);
+						
+						return Reflect.getOwnPropertyDescriptor(storage, item);
+					},
+					has: (target, item) => item in stor.get(target) || item in getPrototypeOf(target),
+					ownKeys: target => keys(stor.get(target)),
 				}), global[storage]), [ storage, {
 					get: _ => prox,
 					configurable: true,
@@ -369,6 +374,14 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				
 				global.Element.prototype.setAttribute = new Proxy(global.Element.prototype.setAttribute, {
 					apply: (target, that, [ attr, value ]) => this.attribute(that, attr, value, meta(), getAttribute, setAttribute),
+				});
+				
+				global.Document.prototype.write = new Proxy(global.Document.prototype.write, {
+					apply: (target, that, text) => Reflect.apply(target, that, [ this.html(text.join(''), meta(), { snippet: true }) ]),
+				});
+				
+				global.Document.prototype.writeln = new Proxy(global.Document.prototype.writeln, {
+					apply: (target, that, text) => Reflect.apply(target, that, [ this.html(text.join(''), meta(), { snippet: true }) ]),
 				});
 				
 				var script_handler = desc => ({
@@ -460,7 +473,9 @@ var rw_bundle = this && arguments.callee.caller.caller,
 					
 					this.attr.url[1].forEach(attr => descs.hasOwnProperty(attr) && defineProperty(proto, attr, {
 						get(){
-							return this.getAttribute(attr);
+							var value = this.getAttribute(attr);
+							
+							return value == null ? '' : value;
 						},
 						set(value){
 							return this.setAttribute(attr, value);

