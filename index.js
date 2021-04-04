@@ -655,7 +655,7 @@ class rewriter {
 		
 		var type = this.attribute_type(wnode, attr, wnode_getAttribute, wnode_setAttribute);
 		
-		return wnode.hasAttribute(attr + '-rw') ? wnode.getAttribute(attr + '-rw') : value ? this.decode_source(value, meta) : value;
+		return wnode.hasAttribute('rw-' + attr) ? wnode.getAttribute('rw-' + attr) : value ? this.decode_source(value, meta) : value;
 	}
 	attribute(node, name, value, meta, wnode_getAttribute, wnode_setAttribute){
 		var wnode = typeof global.Node == 'function' && node instanceof global.Node ? node : new parse5_node_wrapper(node);
@@ -682,7 +682,7 @@ class rewriter {
 		switch(data.type){
 			case'url':
 				
-				wnode_setAttribute(data.name + '-rw', data.value);
+				wnode_setAttribute('rw-' + data.name, data.value);
 				
 				wnode_setAttribute(data.name, data.tag == 'link' && data.rel.includes('icon') ? '/service/favicon' : data.name == 'srcset'
 					? data.value.replace(this.regex.html.srcset, (m, url, size) => this.url(url, meta) + size)
@@ -693,21 +693,17 @@ class rewriter {
 				break;
 			case'del':
 				
-				wnode_setAttribute(data.name + '-rw', data.value);
+				wnode_setAttribute('rw-' + data.name, data.value);
 				
 				wnode.removeAttribute(data.name);
 				
 				break;
 			case'css':
 				
-				wnode_setAttribute(data.name + '-rw', data.value);
-				
 				wnode_setAttribute(data.name, this.css(data.value, meta, { inline: true }));
 				
 				break;
 			case'js':
-				
-				wnode_setAttribute(data.name + '-rw', data.value);
 				
 				try{
 					wnode_setAttribute(data.name, 'return' + this.js('(()=>{' + data.value + '\n})()', meta, { inline: true, source: data.value }));
@@ -718,7 +714,7 @@ class rewriter {
 				break;
 			case'html':
 				
-				wnode_setAttribute(data.name + '-rw', data.value);
+				wnode_setAttribute('rw-' + data.name, data.value);
 				
 				wnode_setAttribute(data.name, this.html(data.value, meta, { snippet: true }));
 				
