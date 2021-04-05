@@ -39,7 +39,9 @@ var fs = require('fs'),
 			var promise = new Promise((resolve, reject) => Promise.allSettled(this.wqueue[table]).then(() => {
 					var start = Date.now(), time;
 					
-					super[prop](query, ...args, (err, row, ind) => ((ind = this.wqueue[table].indexOf(promise)) != -1 && this.wqueue[table].splice(ind, 1), err ? reject(err) + console.error(query, '\n', err) : resolve(row)));
+					super[prop](query, ...args, (err, row, ind) => ((ind = this.wqueue[table].indexOf(promise)) != -1 && this.wqueue[table].splice(ind, 1), err ? reject(err) : resolve(row)));
+					
+					// console.error(query, '\n', err)
 					
 					time = Date.now() - start;
 					
@@ -121,7 +123,7 @@ module.exports = class extends require('./index.js') {
 				for(var name in parsed){
 					var cookie = parsed[name],
 						domain = cookie.domain || meta.url.host,
-						got = await data.get(`select * from "${meta.id}" where domain = ?`, domain),
+						got = await data.get(`select * from "${meta.id}" where domain = ?`, domain).catch(() => false),
 						existing = got ? nodehttp.cookies.parse_object(got.value, true) : {};
 					
 					existing[name] = cookie;
@@ -191,17 +193,13 @@ module.exports = class extends require('./index.js') {
 					if(['js', 'css', 'html', 'manifest'].includes(route)){
 						var body = await this.decompress(req, resp);
 						
-						// console.time(route);
-						
 						try{
 							var parsed = await this[route](body.toString(), meta, { inline: false, global: decoded.get('global') == true, mime: content_type });
 						}catch(err){
 							console.error(err);
 							
-							return '<pre>' + nodehttp.sanitize(util.format(err)) + '</pre>';
+							return res.error(err);
 						}
-						
-						// console.timeEnd(route);
 						
 						res.send(parsed);
 					}else{
@@ -261,7 +259,7 @@ module.exports = class extends require('./index.js') {
 		
 		// meta.id is hex, has no quotes so it can be wrapped in ""
 		var out = {},
-			existing = meta.id && await data.all(`select * from "${meta.id}" where domain = ?1 or ?1 like ('%' || domain)`, [ meta.url.host ]).catch(err => (console.error(err), []));
+			existing = meta.id && await data.all(`select * from "${meta.id}" where domain = ?1 or ?1 like ('%' || domain)`, [ meta.url.host ]).catch(err => []);
 		
 		out.cookie = existing.map(data => data.value).join(' ');
 		
@@ -310,28 +308,25 @@ module.exports = class extends require('./index.js') {
 			switch(header.toLowerCase()){
 				case'set-cookie':
 					
-					await data.run(`create table if not exists "${meta.id}" (
+					/*data.run(`create table if not exists "${meta.id}" (
 						domain text primary key not null,
 						value text,
 						access integer not null
 					)`);
 					
-					for(var ind = 0; ind < arr.length; ind++){
+					var domains = await data.all(`select * from "${meta.id}"`);
+					
+					for(var ind in arr){
 						var parsed = nodehttp.cookies.parse_object(val, true);
 						
 						for(var name in parsed){
 							var cookie = parsed[name],
 								domain = cookie.domain || meta.url.host,
-								got = await data.get(`select * from "${meta.id}" where domain = ?`),
-								existing = got ? nodehttp.cookies.format_object(got.value, true) : {};
+								got = domains.find(data => data.domain == domain) || { domain: domain, value: '' };
 							
-							existing[name] = Object.assign({}, cookie);
-							
-							delete existing[name].name;
-							
-							await data.run(`insert or replace into "${meta.id}" (domain,value,access) values (?, ?, ?)`, got ? got.domain : domain, nodehttp.cookies.format_object(existing), Date.now());
+							data.run(`insert or replace into "${meta.id}" (domain,value,access) values (?, ?, ?)`, got.domain, nodehttp.cookies.format_object(Object.assign(nodehttp.cookies.parse_object(got.value, true), { [name]: cookie })), Date.now());
 						};
-					};
+					};*/
 					
 					break;
 				case'location':

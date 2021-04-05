@@ -66,7 +66,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 					return location;
 				},
 				is_location = object => {
-					var proto = object != null && typeof object == 'object' && getPrototypeOf(object);
+					var proto = getPrototypeOf(object);
 					
 					try{
 						return proto && ['[object Location]', '[object WorkerLocation]'].includes(toString(proto));
@@ -75,7 +75,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 					}
 				},
 				rw_proxy = object => {
-					if(is_location(object))return wrapped_locations.get(object) || wrapped_location(object);
+					if(typeof object == 'object' && object != null && is_location(object))return wrapped_locations.get(object) || wrapped_location(object);
 					return object;
 				},
 				bind_proxy = (obj, obj_prox, func, prox) => prox = new Proxy(func, {
@@ -101,7 +101,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 					
 					// rw_get(parent, 'eval') 😶
 					
-					if(typeof ret == 'function' && /eval\(\) {\s+\[native code]\s+}$/.test(ret))return glob_evals.has(ret) ? glob_evals.get(ret) : (glob_evals.set(ret, script => ret(rw_eval(script))), glob_evals.get(ret));
+					if(typeof ret == 'function' && ret.name == 'eval' && /eval\(\) {\s+\[native code]\s+}$/.test(ret))return glob_evals.has(ret) ? glob_evals.get(ret) : (glob_evals.set(ret, script => ret(rw_eval(script))), glob_evals.get(ret));
 					
 					var out = rw_proxy(ret);
 					
@@ -109,14 +109,10 @@ var rw_bundle = this && arguments.callee.caller.caller,
 					
 					return out;
 				},
-				rw_set = (object, property) => {
-					return {
-						set _(value){
-							if(is_location(value))return rw_proxy(object).href = value;
-							
-							return Reflect.set(object, property, value);
-						},
-					};
+				rw_set = (object, property, value) => {
+					if(typeof value == 'object' && value != null && is_location(value))return rw_proxy(object).href = value;
+					
+					return object[property] = value;
 				},
 				rw_eval = script => {
 					return this.js(script, meta(), { inline: true });
@@ -124,7 +120,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				rw_func = (construct, args) => {
 					var decoy = construct(args),
 						script = args.splice(-1)[0],
-						proxied = construct([ ...args, 'return' + this.js('(()=>{' + script + '\n})()', meta(), { source: script, inline: true }) ]);
+						proxied = construct([ ...args, 'return' + this.js('(()=>{' + script + '\n})()', meta(), { source: false, inline: true }) ]);
 					
 					defineProperty(proxied, 'length', { get: _ => decoy.length, set: _ => _ });
 					proxied.toString = Function.prototype.toString.bind(decoy);
@@ -136,9 +132,9 @@ var rw_bundle = this && arguments.callee.caller.caller,
 			this.revokeObjectURL = URL.revokeObjectURL;
 			
 			global.rw$g = rw_get;
-			global.rw$gg = object => is_location(object) ? rw_proxy(object) : object;
+			global.rw$gg = object => typeof object == 'object' && object != null && is_location(object) ? rw_proxy(object) : object;
 			global.rw$s = rw_set;
-			global.rw$gs = prop => rw_set(global, prop);
+			global.rw$gs = (prop, value) => rw_set(prop, value);
 			global.$rw_eval = rw_eval;
 			global.$rw_url = rw_url;
 			
@@ -219,7 +215,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 			
 			if(global.XMLHttpRequest)global.XMLHttpRequest = class extends global.XMLHttpRequest {
 				open(method, url, ...args){
-					return super.open(method, rewriter.url(new URL(url, location).href, meta()), ...args);
+					return super.open(method, rewriter.url(url, meta()), ...args);
 				}
 				get responseURL(){
 					return rewriter.unurl(super.responseURL, meta());
@@ -298,7 +294,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 					var [ item ] = stor.args('getItem', 1, args),
 						value = stor.get(this)[item];
 					
-					return typeof value != 'string' ? null : storage[item];
+					return typeof value != 'string' ? null : value;
 				};
 				
 				global.Storage.prototype.setItem = function(...args){

@@ -55,6 +55,10 @@ console.log(({ [location]: {} })[location]); // {}
 console.log(window[location]());
 
 var test = { location: "sus" };
+
+window.location += 2;
+
+window[test] = other[prop] = 73;
 `, { base: 'about:null', origin: 'about:null' }));
 
 server.alias('/gateway', '/gateway.php');

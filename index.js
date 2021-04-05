@@ -14,7 +14,7 @@ var css = require('css-tree'),
 		for(var prop in obj)if(prop != 'parent' && typeof obj[prop] == 'object' && obj[prop] != null){
 			obj[prop].parent = obj;
 			
-			if(!Array.isArray(obj[prop]) && obj[prop].type)arr.push([ obj, obj[prop] ]);
+			if(!Array.isArray(obj[prop]) && obj[prop].type)arr.push(obj[prop]);
 			
 			iterate_est(obj[prop], arr);
 		}
@@ -324,19 +324,51 @@ class rewriter {
 				
 				for(var prop in newnode)if(!Array.isArray(newnode[prop]) && newnode[prop] != null && typeof newnode[prop] == 'object')newnode[prop].parent = newnode;
 				
+				newnode.original = node;
+				
 				return newnode;
 			},
-			rw_url = (...args) => ({
-				type: 'CallExpression',
-				callee: { type: 'Identifier', name: '$rw_url' },
-				arguments: args,
-			}),
-			asm_blocks = [];
+			asm_blocks = [],
+			set_to_view = {
+				'+=': '+',
+				'-=': '=',
+				'=': '=',
+				'*=': '*',
+				'/=': '/',
+				'%=': '%',
+				'<<=': '<<',
+				'>>=': '>>',
+				'>>>=': '>>>',
+				'&=': '&',
+				'^=': '^',
+				'|=': '|',
+				'**=': '**',
+			};
 		
-		iterate_est(tree).forEach(([ parent, node ]) => {
-			if(asm_blocks.some(block => iterate_est(block).some(([ p, n ]) => n == node)))return;
+		iterate_est(tree).forEach(node => {
+			if(asm_blocks.some(block => iterate_est(block).includes(node)))return;
 			
 			switch(node.type){
+				case'ImportExpression':
+					
+					node.source = {
+						type: 'CallExpression',
+						callee: { type: 'Identifier', name: '$rw_url' },
+						arguments: [ node.source ],
+					};
+					
+					break;
+				case'ImportDeclaration':
+					
+					node.source.raw = JSON.stringify(this.url(node.source.value, meta, { route: 'js' }));
+					
+					break;
+				case'ExpressionStatement':
+					
+					if(node.directive == 'use asm')asm_blocks.push(node.parent);
+					
+					break;
+				// more likely to change code below
 				case'CallExpression':
 					
 					if(node.callee.name == 'eval')node.arguments = [{
@@ -346,89 +378,87 @@ class rewriter {
 					}];
 					
 					break;
-				case'ImportExpression':
-					
-					node.source = rw_url(node.source);
-					
-					break;
-				case'ImportDeclaration':
-					
-					node.source.raw = JSON.stringify(this.url(node.source.value, meta, { route: 'js' }));
-					
-					break;
 				case'Identifier':
 					
-					var type = (node.parent || {}).type;
-					
-					if(node.name == 'location' && (!node.parent || node.parent.type == 'Property' ? node.parent.computed : index(node.parent) != 'params')){
-						if(['UpdateExpression', 'AssignmentExpression'].includes(type))replace(node, {
-							type: 'MemberExpression',
-							object: {
-								type: 'CallExpression',
-								callee: { type: 'Identifier', name: 'rw$gs' },
-								arguments: [ node ],
-							},
-							property: { type: 'Identifier', name: '_' },
-						});
-						// argument, property, etc just not object.prop.location
-						else if(type != 'MemberExpression')replace(node, {
-							type: 'CallExpression',
-							callee: { type: 'Identifier', name: 'rw$gg' },
-							arguments: [ node ],
-						});
-					}
-					
-					break;
-				case'ExpressionStatement':
-					
-					if(node.directive == 'use asm')asm_blocks.push(node.parent);
+					if(node.name == 'location' && (node.parent.type == 'Property' ? node.parent.computed : index(node.parent) != 'params'))replace(node, {
+						type: 'CallExpression',
+						callee: { type: 'Identifier', name: 'rw$gg' },
+						arguments: [ node ],
+						rw_getter: true,
+						rw_global: true,
+					});
 					
 					break;
 				case'MemberExpression':
 					
-					var setting = ['UpdateExpression', 'AssignmentExpression'].includes((node.parent || {}).type) && ['argument', 'left'].includes(index(node)),
-						bound = node.parent && node.parent.type == 'CallExpression' ? { type: 'Literal', value: true } : [];
+					var bound = node.parent.type == 'CallExpression' ? { type: 'Literal', value: true } : [];
 					
-					if(node.computed)replace(node, setting ? {
-						type: 'MemberExpression',
-						object: {
-							type: 'CallExpression',
-							callee: { type: 'Identifier', name: 'rw$s' },
-							arguments: [ node.object, node.property ].concat(bound),
-						},
-						property: { type: 'Identifier', name: '_' },
-					} : {
+					if(node.computed || node.property.name == 'location')replace(node, {
 						type: 'CallExpression',
 						callee: { type: 'Identifier', name: 'rw$g' },
-						arguments: [ node.object, node.property ].concat(bound),
+						arguments: [ node.object, node.computed ? node.property : { type: 'Literal', value: node.property.name } ].concat(bound),
+						rw_getter: true,
 					});
-					else if(node.property.name == 'location')replace(node, setting ? {
-						type: 'MemberExpression',
-						object: {
-							type: 'CallExpression',
-							callee: { type: 'Identifier', name: 'rw$s' },
-							arguments: [ node.object, { type: 'Literal', value: 'location' } ],
-						},
-						property: { type: 'Identifier', name: '_' },
-					} : {
-						type: 'CallExpression',
-						callee: { type: 'Identifier', name: 'rw$g' },
-						arguments: [ node.object, { type: 'Literal', value: 'location' } ],
-					});
-					
-					/*if(node.property.value == 'location'){
-						replace(node, ['UpdateExpression', 'AssignmentExpression'].includes(node.parent) ? rw_set(node) : {
-							
-						});
-					}*/
-					// console.log(node.property);
 					
 					break;
 			}
 		});
 		
+		var proc_node = node => {
+			switch(node.type){
+				case'AssignmentExpression':
+					
+					if(node.left.rw_getter){
+						var assigned = node.operator == '=' ? proc_node(node.right) : {
+							type: 'BinaryExpression',
+							left: node.left,
+							right: node.right,
+							operator: set_to_view[node.operator],
+						};
+						
+						return replace(node, node.left.rw_global ? {
+							type: 'CallExpression',
+							callee: { type: 'Identifier', name: 'rw$gs' },
+							arguments: [ node.left.arguments[0], assigned ],
+						}: {
+							type: 'CallExpression',
+							callee: { type: 'Identifier', name: 'rw$s' },
+							arguments: [ node.left.arguments[0], node.left.arguments[1], assigned ],
+						});
+					}
+					
+					break;
+				case'UpdateExpression':
+					
+					if(node.argument.rw_getter){
+						var assigned = {
+							type: 'BinaryExpression',
+							left: node.argument.original,
+							right: { type: 'Literal', value: 1 },
+							operator: node.operator == '++' ? '+' : '-',
+						};
+						
+						replace(node, node.argument.rw_global ? {
+							type: 'CallExpression',
+							callee: { type: 'Identifier', name: 'rw$gs' },
+							arguments: [ node.argument.arguments[0], assigned ],
+						}: {
+							type: 'CallExpression',
+							callee: { type: 'Identifier', name: 'rw$s' },
+							arguments: [ node.argument.arguments[0], node.argument.arguments[1], assigned ],
+						});
+					}
+					
+					break;
+			}
+			
+			return node;
+		};
+		
+		iterate_est(tree).forEach(proc_node);
+		
 		try{
-			var string = esotope.generate(tree/*, { format: {
+			var string = esotope.generate(tree, { format: {
 				indent: { style: '', base: 0 },
 				renumber: true,
 				hexadecimal: true,
@@ -437,7 +467,7 @@ class rewriter {
 				compact: true,
 				parentheses: false,
 				semicolons: false
-			} }*/);
+			} });
 		}catch(err){
 			console.error(meta, err);
 			
@@ -494,7 +524,7 @@ class rewriter {
 		return value;
 	}
 	encode_source(value, options){
-		return '/*RW_PRS' + module.exports.codec.base64.encode(encodeURI(options.source || value)) + 'RW_PRS*/';
+		return options.source == false ? '' : '/*RW_PRS' + module.exports.codec.base64.encode(encodeURI(options.source || value)) + 'RW_PRS*/';
 	}
 	/**
 	* Undos rewriting
