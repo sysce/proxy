@@ -9,6 +9,7 @@ var fs = require('fs'),
 	crypto = require('crypto'),
 	webpack = require('webpack'),
 	webpack = require('webpack'),
+	cookies = require('./cookies'),
 	nodehttp = require('sys-nodehttp'),
 	WebSocket = require('ws'),
 	sqlite3 = class extends require('sqlite3').Database {
@@ -118,19 +119,19 @@ module.exports = class extends require('./index.js') {
 				// only works if table exists
 				if(!meta.id || !(await data.run(`select * from "${meta.id}";`).then(() => true).catch(err => false)) || !meta.url || !req.body.value)return res.error(400, 'Invalid body');
 				
-				var parsed = nodehttp.cookies.parse_object(req.body.value, true);
+				var parsed = cookies.parse_object(req.body.value, true);
 				
 				for(var name in parsed){
 					var cookie = parsed[name],
 						domain = cookie.domain || meta.url.host,
 						got = await data.get(`select * from "${meta.id}" where domain = ?`, domain).catch(() => false),
-						existing = got ? nodehttp.cookies.parse_object(got.value, true) : {};
+						existing = got ? cookies.parse_object(got.value, true) : {};
 					
 					existing[name] = cookie;
 					
 					delete existing[name].name;
 					
-					await data.run(`insert or replace into "${meta.id}" (domain,value,access) values (?, ?, ?)`, got ? got.domain : domain, nodehttp.cookies.format_object(existing).join(' '), Date.now());
+					await data.run(`insert or replace into "${meta.id}" (domain,value,access) values (?, ?, ?)`, got ? got.domain : domain, cookies.format_object(existing).join(' '), Date.now());
 				}
 				
 				return res.status(200).end();
@@ -214,6 +215,9 @@ module.exports = class extends require('./index.js') {
 					
 					if(failure || res.body_sent || res.head_sent)return;
 					
+					// todo: unsecure site warning
+					// if([ 'TLS', 'INVALID' ].every(key => err.code.split('_').includes(key)))
+					
 					res.error(400, err);
 				}).end(req.raw_body);
 			});
@@ -225,7 +229,7 @@ module.exports = class extends require('./index.js') {
 			wss.on('connection', async (cli, req) => {
 				var req_url = new this.URL(req.url, new this.URL('wss://' + req.headers.host)),
 					url = this.unurl(req_url.href, this.empty_meta),
-					cookies = nodehttp.cookies.parse_object(req.headers.cookie),
+					cookies = cookies.parse_object(req.headers.cookie),
 					meta = { url: url, origin: req_url.origin, base: url, id: cookies.proxy_id };
 				
 				if(!url)return cli.close();
@@ -259,7 +263,7 @@ module.exports = class extends require('./index.js') {
 		
 		// meta.id is hex, has no quotes so it can be wrapped in ""
 		var out = {},
-			existing = meta.id && await data.all(`select * from "${meta.id}" where domain = ?1 or ?1 like ('%' || domain)`, [ meta.url.host ]).catch(err => []);
+			existing = []; // meta.id && await data.all(`select * from "${meta.id}" where domain = ?1 or ?1 like ('%' || domain)`, [ meta.url.host ]).catch(err => []);
 		
 		out.cookie = existing.map(data => data.value).join(' ');
 		
@@ -308,25 +312,23 @@ module.exports = class extends require('./index.js') {
 			switch(header.toLowerCase()){
 				case'set-cookie':
 					
-					/*data.run(`create table if not exists "${meta.id}" (
+					var domains = await data.all(`select * from "${meta.id}"`).catch(err => (data.run(`create table if not exists "${meta.id}" (
 						domain text primary key not null,
 						value text,
 						access integer not null
-					)`);
-					
-					var domains = await data.all(`select * from "${meta.id}"`);
+					)`), []));
 					
 					for(var ind in arr){
-						var parsed = nodehttp.cookies.parse_object(val, true);
+						var parsed = cookies.parse_object(val, true);
 						
 						for(var name in parsed){
 							var cookie = parsed[name],
 								domain = cookie.domain || meta.url.host,
 								got = domains.find(data => data.domain == domain) || { domain: domain, value: '' };
 							
-							data.run(`insert or replace into "${meta.id}" (domain,value,access) values (?, ?, ?)`, got.domain, nodehttp.cookies.format_object(Object.assign(nodehttp.cookies.parse_object(got.value, true), { [name]: cookie })), Date.now());
+							data.run(`insert or replace into "${meta.id}" (domain,value,access) values (?, ?, ?)`, got.domain, cookies.format_object(Object.assign(cookies.parse_object(got.value, true), { [name]: cookie })), Date.now());
 						};
-					};*/
+					};
 					
 					break;
 				case'location':
@@ -353,10 +355,7 @@ module.exports = class extends require('./index.js') {
 			if(req.method != 'HEAD' && res.statusCode != 204  && res.statusCode != 304)switch(res.headers['content-encoding'] || res.headers['x-content-encoding']){
 				case'gzip':
 					
-					res = res.pipe(zlib.createGunzip({
-						flush: zlib.Z_SYNC_FLUSH,
-						finishFlush: zlib.Z_SYNC_FLUSH
-					}));
+					res = res.pipe(zlib.createGunzip({ flush: zlib.Z_SYNC_FLUSH, finishFlush: zlib.Z_SYNC_FLUSH }));
 					
 					break;
 				case'deflate':

@@ -1,7 +1,7 @@
 'use strict';
 var css = require('css-tree'),
-	parse5 = require('parse5'),
 	acorn = require('acorn'),
+	parse5 = require('parse5'),
 	esotope = require('./esotope'),
 	browser = typeof window != 'undefined',
 	iterate_p5 = (node, out = [ [ [ node ], 0 ] ]) => {
@@ -393,7 +393,8 @@ class rewriter {
 					
 					var bound = node.parent.type == 'CallExpression' ? { type: 'Literal', value: true } : [];
 					
-					if(node.computed || node.property.name == 'location')replace(node, {
+					// window.eval is global eval func
+					if(node.computed || [ 'eval', 'location' ].includes(node.property.name))replace(node, {
 						type: 'CallExpression',
 						callee: { type: 'Identifier', name: 'rw$g' },
 						arguments: [ node.object, node.computed ? node.property : { type: 'Literal', value: node.property.name } ].concat(bound),
@@ -410,20 +411,25 @@ class rewriter {
 					
 					if(node.left.rw_getter){
 						var assigned = node.operator == '=' ? proc_node(node.right) : {
-							type: 'BinaryExpression',
-							left: node.left,
-							right: node.right,
-							operator: set_to_view[node.operator],
-						};
+								type: 'BinaryExpression',
+								left: proc_node(node.left),
+								right: proc_node(node.right),
+								operator: set_to_view[node.operator],
+							},
+							obj = node.left.arguments[0],
+							prop = node.left.arguments[1];
+						
+						if(obj)obj = proc_node(obj);
+						if(prop)prop = proc_node(prop);
 						
 						return replace(node, node.left.rw_global ? {
 							type: 'CallExpression',
 							callee: { type: 'Identifier', name: 'rw$gs' },
-							arguments: [ node.left.arguments[0], assigned ],
+							arguments: [ obj, assigned ],
 						}: {
 							type: 'CallExpression',
 							callee: { type: 'Identifier', name: 'rw$s' },
-							arguments: [ node.left.arguments[0], node.left.arguments[1], assigned ],
+							arguments: [ obj, prop, assigned ],
 						});
 					}
 					
@@ -458,7 +464,7 @@ class rewriter {
 		iterate_est(tree).forEach(proc_node);
 		
 		try{
-			var string = esotope.generate(tree, { format: {
+			var string = esotope.generate(tree, false ? { format: {
 				indent: { style: '', base: 0 },
 				renumber: true,
 				hexadecimal: true,
@@ -467,7 +473,7 @@ class rewriter {
 				compact: true,
 				parentheses: false,
 				semicolons: false
-			} });
+			} } : {}) + `//# sourceURL=proxied${this.checksum(value)}\n`;
 		}catch(err){
 			console.error(meta, err);
 			
@@ -804,6 +810,7 @@ class rewriter {
 		
 		return out;
 	}
+	checksum(s,h=0,i=0){while(i<s.length)h=(h<<5)-h+s.charCodeAt(i++)<<0;return h}
 };
 
 rewriter.codec = {

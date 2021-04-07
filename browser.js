@@ -1,9 +1,9 @@
 var rw_bundle = this && arguments.callee.caller.caller,
-	cookies = require('sys-nodehttp/cookies'),
+	cookies = require('./cookies'),
 	_rewriter = class extends require('./index.js') {
 	
 	hook_frame(node){
-		if(!node.src && node.contentWindow)new node.contentWindow.Function('(' + rw_bundle + ')()')();
+		if(node.contentWindow)new node.contentWindow.Function('(' + rw_bundle + ')()')();
 	}
 	exec_globals(){
 		if(typeof rw$g == 'undefined'){
