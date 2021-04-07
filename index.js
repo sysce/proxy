@@ -380,7 +380,8 @@ class rewriter {
 					break;
 				case'Identifier':
 					
-					if(node.name == 'location' && (node.parent.type == 'Property' ? node.parent.computed : index(node.parent) != 'params'))replace(node, {
+					// eval.call, eval.apply
+					if((node.name == 'location' || node.name == 'eval' && index(node) == 'object') && (node.parent.type == 'Property' ? node.parent.computed : index(node.parent) != 'params'))replace(node, {
 						type: 'CallExpression',
 						callee: { type: 'Identifier', name: 'rw$gg' },
 						arguments: [ node ],

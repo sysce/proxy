@@ -75,6 +75,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 					}
 				},
 				rw_proxy = object => {
+					if(typeof object == 'function' && object.name == 'eval' && /eval\(\) {\s+\[native code]\s+}$/.test(object))return glob_evals.has(object) ? glob_evals.get(object) : (glob_evals.set(object, script => object(rw_eval(script))), glob_evals.get(object));
 					if(typeof object == 'object' && object != null && is_location(object))return wrapped_locations.get(object) || wrapped_location(object);
 					return object;
 				},
@@ -97,13 +98,8 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				glob_evals = new Map(),
 				rw_url = url => this.url(url, meta()),
 				rw_get = (object, property, bound) => {
-					var ret = object[property];
-					
-					// rw_get(parent, 'eval') 😶
-					
-					if(typeof ret == 'function' && ret.name == 'eval' && /eval\(\) {\s+\[native code]\s+}$/.test(ret))return glob_evals.has(ret) ? glob_evals.get(ret) : (glob_evals.set(ret, script => ret(rw_eval(script))), glob_evals.get(ret));
-					
-					var out = rw_proxy(ret);
+					var ret = object[property],
+						out = rw_proxy(ret);
 					
 					if(typeof out == 'function' && bound)out = bind_proxy(object, {}, out);
 					
@@ -115,7 +111,9 @@ var rw_bundle = this && arguments.callee.caller.caller,
 					return object[property] = value;
 				},
 				rw_eval = script => {
-					return this.js(script, meta(), { inline: true });
+					if(typeof script == 'object')return script;
+					if(typeof script == 'string' && !script.length)return undefined;
+					return this.js(script + '', meta(), { inline: true });
 				},
 				rw_func = (construct, args) => {
 					var decoy = construct(args),
@@ -132,7 +130,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 			this.revokeObjectURL = URL.revokeObjectURL;
 			
 			global.rw$g = rw_get;
-			global.rw$gg = object => typeof object == 'object' && object != null && is_location(object) ? rw_proxy(object) : object;
+			global.rw$gg = object => rw_proxy(object);
 			global.rw$s = rw_set;
 			global.rw$gs = (prop, value) => rw_set(prop, value);
 			global.$rw_eval = rw_eval;
