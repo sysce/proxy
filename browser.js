@@ -362,6 +362,10 @@ var rw_bundle = this && arguments.callee.caller.caller,
 					if(mutation.target.tagName == 'IFRAME')this.hook_frame(mutation.target);
 				})).observe(document, { childList: true, attributes: true, subtree: true });
 				
+				global.Element.prototype.getAttributeNames = new Proxy(global.Element.prototype.getAttributeNames, {
+					apply: (target, that, args) => Reflect.apply(target, that, args).map(attr => !attr.startsWith('rw-')),
+				});
+				
 				global.Element.prototype.getAttribute = new Proxy(global.Element.prototype.getAttribute, {
 					apply: (target, that, [ attr ]) => this.unattribute(that, attr, Reflect.apply(target, that, [ attr ]), meta(), getAttribute, setAttribute),
 				});
@@ -412,10 +416,10 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				
 				var html_handler = desc => ({
 					get(){
-						return rewriter.unhtml(desc.get.call(this) || '', meta(), { snippet: true });
+						return rewriter.unhtml((desc.get.call(this) || '') + '', meta(), { snippet: true });
 					},
 					set(value){
-						return desc.set.call(this, rewriter.html(value || '', meta(), { snippet: true }));
+						return desc.set.call(this, rewriter.html((value || '') + '', meta(), { snippet: true }));
 					},
 				});
 				

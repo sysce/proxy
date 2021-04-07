@@ -259,7 +259,7 @@ module.exports = class extends require('./index.js') {
 		}
 	}
 	async headers_encode(headers, meta){
-		// prepare headers to be sent to a request url (eg google.com)
+		// prepare headers to be sent to a request url
 		
 		// meta.id is hex, has no quotes so it can be wrapped in ""
 		var out = {},

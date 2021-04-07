@@ -557,7 +557,7 @@ class rewriter {
 		return JSON.stringify(json, (key, val) => ['start_url', 'key', 'src', 'url'].includes(key) ? this.url(val, meta) : val);
 	}
 	inject_head(){
-		var inject_attr = { name: 'data-rw-injected', value: '' };
+		var inject_attr = { name: 'rw-injected', value: '' };
 		
 		return [
 			{ nodeName: 'link', tagName: 'link', attrs: [ { name: 'type', value: 'image/x-icon' }, { name: 'rel', value: 'shortcut icon' }, { name: 'href', value: this.config.prefix + '/favicon' },  inject_attr ] },
@@ -577,13 +577,13 @@ class rewriter {
 	* @returns {String} Processed URL
 	*/
 	html(value, meta, options = {}){
-		if(!value)return value;
+		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
 		
 		this.validate_meta(meta);
 		
 		value = value.toString();
 		
-		var parsed = parse5.parse(value), head;
+		var parsed = parse5.parse(options.snippet ? '<pro>' + value + '</pro>' : value), head;
 		
 		iterate_p5(parsed).forEach(([ parent, node ]) => {
 			if(node.tagName == 'head')head = node;
@@ -632,6 +632,7 @@ class rewriter {
 		});
 		
 		if(!options.snippet)(head || parsed).childNodes.unshift(...this.inject_head());
+		else parsed.childNodes = parsed.childNodes[0].childNodes[1].childNodes[0].childNodes.map(node => (node.parentNode = parsed, node));
 		
 		return parse5.serialize(parsed);
 	}
@@ -651,9 +652,12 @@ class rewriter {
 		
 		value = value.toString();
 		
-		var parsed = parse5.parse(value), head;
+		var parsed = parse5.parse(options.snippet ? '<pro>' + value + '</pro>' : value), head;
 		
-		iterate_p5(parsed).forEach(([ parent, node ]) => node.attrs && node.attrs.some(attr => attr.name == 'data-rw-injected') && parent.splice(parent.indexOf(node)));
+		// remove rw- attribute or remove injected node
+		iterate_p5(parsed).forEach(([ parent, node ]) => node.attrs && (node.attrs.some(attr => attr.name == 'rw-injected') && parent.splice(parent.indexOf(node)) || (node.attrs = node.attrs.filter(attr => !attr.name.startsWith('rw-')))));
+		
+		if(options.snippet)parsed.childNodes = parsed.childNodes[0].childNodes[1].childNodes[0].childNodes.map(node => (node.parentNode = parsed, node));
 		
 		return parse5.serialize(parsed);
 	}
