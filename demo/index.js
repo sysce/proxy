@@ -1,7 +1,7 @@
 'use strict';
 var fs = require('fs'),
 	path = require('path'),
-	nodehttp = require('../../nodehttp'),
+	nodehttp = require('sys-nodehttp'),
 	rewriter = require('../'),
 	config = JSON.parse(fs.readFileSync(path.join(__dirname, 'config.json'))),
 	server = new nodehttp.server({
