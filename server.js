@@ -61,8 +61,8 @@ var fs = require('fs'),
 		run(...args){
 			return this.promisify('run', args);
 		}
-	},
-	data = new sqlite3(path.join(__dirname, 'data.db'));
+	};
+	// data = new sqlite3(path.join(__dirname, 'data.db'));
 
 module.exports = class extends require('./index.js') {
 	constructor(config){
@@ -113,6 +113,7 @@ module.exports = class extends require('./index.js') {
 			});
 			
 			this.config.server.post(this.config.prefix + '/cookie', async (req, res) => {
+				/*
 				var meta = { id: req.meta_id, url: this.valid_url(req.body.url) };
 				
 				// only works if table exists
@@ -132,13 +133,11 @@ module.exports = class extends require('./index.js') {
 					
 					await data.run(`insert or replace into "${meta.id}" (domain,value,access) values (?, ?, ?)`, got ? got.domain : domain, cookies.format_object(existing).join(' '), Date.now());
 				}
-				
-				return res.status(200).end();
+				*/
+				res.status(200).end();
 			});
 			
-			this.config.server.get(this.config.prefix + '/favicon', async (req, res) => {
-				res.contentType('image/png').send(Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAA', 'base64'));
-			});
+			this.config.server.get(this.config.prefix + '/favicon', async (req, res) => res.contentType('image/png').send(Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAA', 'base64')));
 			
 			this.config.server.use(this.config.prefix + '/', nodehttp.static(this.webpack.options.output.path, {
 				listing: [ '/' ],
@@ -264,7 +263,7 @@ module.exports = class extends require('./index.js') {
 		var out = {},
 			existing = []; // meta.id && await data.all(`select * from "${meta.id}" where domain = ?1 or ?1 like ('%' || domain)`, [ meta.url.host ]).catch(err => []);
 		
-		out.cookie = existing.map(data => data.value).join(' ');
+		out.cookie = existing.map(domain => domain.value).join(' ');
 		
 		headers.forEach((value, header) => {
 			switch(header.toLowerCase()){
@@ -311,7 +310,7 @@ module.exports = class extends require('./index.js') {
 			switch(header.toLowerCase()){
 				case'set-cookie':
 					
-					var domains = await data.all(`select * from "${meta.id}"`).catch(err => (data.run(`create table if not exists "${meta.id}" (
+					/*var domains = await data.all(`select * from "${meta.id}"`).catch(err => (data.run(`create table if not exists "${meta.id}" (
 						domain text primary key not null,
 						value text,
 						access integer not null
@@ -327,7 +326,7 @@ module.exports = class extends require('./index.js') {
 							
 							data.run(`insert or replace into "${meta.id}" (domain,value,access) values (?, ?, ?)`, got.domain, cookies.format_object(Object.assign(cookies.parse_object(got.value, true), { [name]: cookie })), Date.now());
 						};
-					};
+					};*/
 					
 					break;
 				case'location':
