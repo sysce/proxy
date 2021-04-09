@@ -227,8 +227,8 @@ module.exports = class extends require('./index.js') {
 			wss.on('connection', async (cli, req) => {
 				var req_url = new this.URL(req.url, new this.URL('wss://' + req.headers.host)),
 					url = this.unurl(req_url.href, this.empty_meta),
-					cookies = cookies.parse_object(req.headers.cookie),
-					meta = { url: url, origin: req_url.origin, base: url, id: cookies.proxy_id };
+					cookis = cookies.parse_object(req.headers.cookie),
+					meta = { url: url, origin: req_url.origin, base: url, id: cookis.proxy_id };
 				
 				if(!url)return cli.close();
 				

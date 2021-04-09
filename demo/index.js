@@ -15,7 +15,7 @@ var fs = require('fs'),
 	}),
 	rw = new rewriter({
 		prefix: '/service',
-		// codec: rewriter.codec.xor,
+		codec: rewriter.codec.xor,
 		server: server,
 		title: 'Service',
 		interface: config.interface,
@@ -61,5 +61,6 @@ window.location += 2;
 window[test] = other[prop] = 73;`, { base: 'about:null', origin: 'about:null' }));
 
 server.alias('/gateway', '/gateway.php');
+server.alias('/prox', '/gateway.php');
 
 console.log(rw.html('<p>test</p>', { base: 'about:null', origin: 'about:null' }, { snippet: true }));
