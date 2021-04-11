@@ -194,7 +194,7 @@ class rewriter {
 			html: [ [ 'iframe' ], [ 'srcdoc' ] ],
 			css: [ '*', [ 'style' ] ],
 			css_keys: [ 'background', 'background-image', 'src' ],
-			url: [ [ 'track', 'template', 'source', 'script', 'object', 'media', 'link', 'input', 'image', 'video', 'iframe', 'frame', 'form', 'embed', 'base', 'area', 'anchor', 'a', 'img', 'use' ], [ 'srcset', 'href', 'xlink:href', 'src', 'action', 'content', 'data', 'poster' ] ],
+			url: [ [ 'line', 'mi', 'math', 'vmlframe ', 'track', 'template', 'source', 'script', 'object', 'media', 'link', 'input', 'image', 'video', 'iframe', 'frame', 'form', 'embed', 'base', 'area', 'anchor', 'a', 'img', 'use' ], [ 'o:href', 'srcset', 'href', 'xlink:href', 'src', 'action', 'content', 'data', 'poster' ] ],
 			// js attrs begin with on
 			del: [ '*', [ 'nonce', 'integrity', 'referrerpolicy' ] ],
 		};
