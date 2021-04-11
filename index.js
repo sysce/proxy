@@ -353,7 +353,7 @@ class rewriter {
 					
 					node.source = {
 						type: 'CallExpression',
-						callee: { type: 'Identifier', name: '$rw_url' },
+						callee: { type: 'Identifier', name: 'rw$u' },
 						arguments: [ node.source ],
 					};
 					
@@ -373,7 +373,7 @@ class rewriter {
 					
 					if(node.callee.name == 'eval')node.arguments = [{
 						type: 'CallExpression',
-						callee: { type: 'Identifier', name: '$rw_eval' },
+						callee: { type: 'Identifier', name: 'rw$e' },
 						arguments: node.arguments,
 					}];
 					
@@ -445,7 +445,7 @@ class rewriter {
 							operator: node.operator == '++' ? '+' : '-',
 						};
 						
-						replace(node, node.argument.rw_global ? {
+						return replace(node, node.argument.rw_global ? {
 							type: 'CallExpression',
 							callee: { type: 'Identifier', name: 'rw$gs' },
 							arguments: [ node.argument.arguments[0], assigned ],
@@ -474,14 +474,14 @@ class rewriter {
 				compact: true,
 				parentheses: false,
 				semicolons: false
-			} } : {}) + `//# sourceURL=proxied${this.checksum(value)}\n`;
+			} } : {}) + `//# sourceURL=p${this.checksum(value)}\n`;
 		}catch(err){
 			console.error(meta, err);
 			
 			return string;
 		}
 		
-		return (options.inline ? this.encode_source(value, options) : '(typeof importScripts=="function"&&/\\[native code]\\s+}$/.test(importScripts)&&importScripts(location.origin+' + JSON.stringify(this.config.prefix + '/main.js') + '));\n') + string;
+		return (options.inline ? this.encode_source(value, options) : '(typeof importScripts=="function"&&/\\[native code]\\s+}$/.test(importScripts)&&typeof rw$g=="undefined"&&importScripts(location.origin+' + JSON.stringify(this.config.prefix + '/main.js') + '));\n') + string;
 	}
 	/**
 	* Rewrites CSS

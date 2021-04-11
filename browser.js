@@ -133,8 +133,8 @@ var rw_bundle = this && arguments.callee.caller.caller,
 			global.rw$gg = object => rw_proxy(object);
 			global.rw$s = rw_set;
 			global.rw$gs = (prop, value) => rw_set(prop, value);
-			global.$rw_eval = rw_eval;
-			global.$rw_url = rw_url;
+			global.rw$e = rw_eval;
+			global.rw$u = rw_url;
 			
 			if(global.URL){
 				if(global.URL.createObjectURL)global.URL.createObjectURL = new Proxy(global.URL.createObjectURL, {
