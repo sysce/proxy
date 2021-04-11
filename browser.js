@@ -182,7 +182,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 			});
 			
 			if(global.importScripts)global.importScripts = new Proxy(global.importScripts, {
-				apply: (target, that, scripts) => Reflect.apply(target, that, scripts.map(script => this.url(new URL(url, location).href, meta(), { route: 'js' }))),
+				apply: (target, that, scripts) => Reflect.apply(target, that, scripts.map(script => this.url(new URL(script, location).href, meta(), { route: 'js' }))),
 			});
 			
 			if(global.Worker)global.Worker = global.Worker.prototype.constructor = new Proxy(global.Worker, {
