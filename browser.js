@@ -136,6 +136,17 @@ var rw_bundle = this && arguments.callee.caller.caller,
 			global.rw$e = rw_eval;
 			global.rw$u = rw_url;
 			
+			var err_stack = Symbol();
+			
+			Object.defineProperty(Error.prototype, 'stack', {
+				get(){
+					return this[err_stack] || (console.error('accessed stack !!'), null);
+				},
+				set(value){
+					return this[err_stack] = value;
+				},
+			});
+			
 			if(global.URL){
 				if(global.URL.createObjectURL)global.URL.createObjectURL = new Proxy(global.URL.createObjectURL, {
 					apply: (target, that, [ source ]) => {
@@ -375,12 +386,24 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				});
 				
 				global.Document.prototype.write = new Proxy(global.Document.prototype.write, {
-					apply: (target, that, text) => Reflect.apply(target, that, [ this.html(text.join(''), meta(), { snippet: true }) ]),
+					apply: (target, that, text) => Reflect.apply(target, that, [ this.html(text.join(''), meta(), { inline: true }) ]),
 				});
 				
 				global.Document.prototype.writeln = new Proxy(global.Document.prototype.writeln, {
-					apply: (target, that, text) => Reflect.apply(target, that, [ this.html(text.join(''), meta(), { snippet: true }) ]),
+					apply: (target, that, text) => Reflect.apply(target, that, [ this.html(text.join(''), meta(), { inline: true }) ]),
 				});
+				
+				var query_handler = {
+					/* query: img[src]
+					** process as: img[src]{}
+					** recieve img[rw-src]{}
+					** remove ending {}
+					*/
+					apply: (target, that, [ selector ]) => Reflect.apply(target, that, [ this.css((selector || '') + '{}', meta()).slice(0, -2) ]),
+				};
+				
+				global.Document.prototype.querySelector = new Proxy(global.Document.prototype.querySelector, query_handler);
+				global.Document.prototype.querySelectorAll = new Proxy(global.Document.prototype.querySelectorAll, query_handler);
 				
 				var script_handler = desc => ({
 						get(){
@@ -416,10 +439,10 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				
 				var html_handler = desc => ({
 					get(){
-						return rewriter.unhtml((desc.get.call(this) || '') + '', meta(), { snippet: true });
+						return rewriter.unhtml((desc.get.call(this) || '') + '', meta(), { inline: true });
 					},
 					set(value){
-						return desc.set.call(this, rewriter.html((value || '') + '', meta(), { snippet: true }));
+						return desc.set.call(this, rewriter.html((value || '') + '', meta(), { inline: true }));
 					},
 				});
 				

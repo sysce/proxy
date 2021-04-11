@@ -27,7 +27,7 @@ server.use(nodehttp.static(path.join(__dirname, 'public'), {
 	},
 }));
 
-console.log(rw.js(`
+/*console.log(rw.js(`
 test["sus" + 100]++;
 console.log(window["locatio" + "n"].href);
 window["locatio" + "n"] = "/";
@@ -58,9 +58,20 @@ var test = { location: "sus" };
 
 window.location += 2;
 
-window[test] = other[prop]++;`, { base: 'about:null', origin: 'about:null' }));
+window[test] = other[prop]++;
+`, { base: 'about:null', origin: 'about:null' }));
+
+console.log(rw.css('img[src*="/test"]', { base: 'about:null', origin: 'about:null' }));
+console.log(rw.css('img[src*="/test"] {}', { base: 'about:null', origin: 'about:null' }));
+console.log(rw.html('<p>test</p>', { base: 'about:null', origin: 'about:null' }, { inline: true }));
+*/
+console.log(rw.css(`img[src*="/test"] {}
+
+test[fake*="1"] {
+	
+}
+`, { base: 'about:null', origin: 'about:null' }));
+console.log(rw.js(`window[test][window[ok]++]`, { base: 'about:null', origin: 'about:null' }));
 
 server.alias('/gateway', '/gateway.php');
 server.alias('/prox', '/gateway.php');
-
-console.log(rw.html('<p>test</p>', { base: 'about:null', origin: 'about:null' }, { snippet: true }));

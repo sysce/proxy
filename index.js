@@ -11,10 +11,12 @@ var css = require('css-tree'),
 		return out;
 	},
 	iterate_est = (obj, arr = []) => {
-		for(var prop in obj)if(prop != 'parent' && typeof obj[prop] == 'object' && obj[prop] != null){
-			obj[prop].parent = obj;
-			
-			if(!Array.isArray(obj[prop]) && obj[prop].type)arr.push(obj[prop]);
+		for(var prop in obj)if(!(['parent', 'original'].includes(prop)) && typeof obj[prop] == 'object' && obj[prop] != null){
+			if(!Array.isArray(obj[prop]) && obj[prop].type){
+				obj[prop].parent = obj;
+				
+				arr.push(obj[prop]);
+			}
 			
 			iterate_est(obj[prop], arr);
 		}
@@ -317,10 +319,18 @@ class rewriter {
 		};
 		
 		var index = node => {
-				for(var name in node.parent)if(node.parent[name] == node)return name;
+				for(var name in node.parent)if(!(['parent', 'original'].includes(name)) && node.parent[name] == node)return name;
 			},
 			replace = (node, newnode) => {	
-				for(var name in node.parent)if(node.parent[name] == node)node.parent[name] = newnode;
+				var index_node = index(node);
+				
+				if(index_node)node.parent[index_node] = newnode;
+				
+				//  && iterate_est(newnode).includes(node[prop])
+				// for(var prop in node)if(!Array.isArray(node[prop]) && node[prop] != null && typeof node[prop] == 'object')node[prop].parent = newnode;
+				
+				// iterate_est(node);
+				// iterate_est(newnode);
 				
 				for(var prop in newnode)if(!Array.isArray(newnode[prop]) && newnode[prop] != null && typeof newnode[prop] == 'object')newnode[prop].parent = newnode;
 				
@@ -381,7 +391,7 @@ class rewriter {
 				case'Identifier':
 					
 					// eval.call, eval.apply
-					if((node.name == 'location' || node.name == 'eval' && index(node) == 'object') && (node.parent.type == 'Property' ? node.parent.computed : index(node.parent) != 'params'))replace(node, {
+					if((node.name == 'location' || node.name == 'eval' && index(node) == 'object') && (node.parent.type == 'Property' ? node.parent.computed : index(node.parent) != 'params') && node.parent.type != 'VariableDeclarator')replace(node, {
 						type: 'CallExpression',
 						callee: { type: 'Identifier', name: 'rw$gg' },
 						arguments: [ node ],
@@ -394,13 +404,15 @@ class rewriter {
 					
 					var bound = node.parent.type == 'CallExpression' ? { type: 'Literal', value: true } : [];
 					
+					var x = node;
+					
 					// window.eval is global eval func
 					if(node.computed || [ 'eval', 'location' ].includes(node.property.name))replace(node, {
 						type: 'CallExpression',
 						callee: { type: 'Identifier', name: 'rw$g' },
 						arguments: [ node.object, node.computed ? node.property : { type: 'Literal', value: node.property.name } ].concat(bound),
 						rw_getter: true,
-					});
+					}); // , console.log(node.arguments[1].parent == node.arguments);
 					
 					break;
 			}
@@ -464,6 +476,8 @@ class rewriter {
 		
 		iterate_est(tree).forEach(proc_node);
 		
+		// console.log(tree.body[0].expression);
+		
 		try{
 			var string = esotope.generate(tree, false ? { format: {
 				indent: { style: '', base: 0 },
@@ -515,9 +529,16 @@ class rewriter {
 				};
 			
 			css.walk(tree, node => {
-				
 				if(node.name == 'import')css.walk(node, node => walk_url(node, 'css'));
 				else if(node.type == 'Url' && node.value && !node.value.rewritten)css.walk(node, walk_url);
+				else if(node.type == 'Selector'){ // not accurate on link[rel] selectors
+					var attr, hnode = { attrs: [] };
+					
+					css.walk(node, snode => {
+						if(snode.type == 'TypeSelector')hnode.tagName = snode.name;
+						else if(snode.type == 'AttributeSelector' && ['del', 'html', 'url'].includes(this.attribute_type(hnode, snode.name.name)))snode.name.name = 'rw-' + snode.name.name;
+					});
+				}
 			});
 			
 			var formatted = css.generate(tree);
@@ -573,7 +594,7 @@ class rewriter {
 	* @param {String} meta.base - Base when creating a url that is not proxied eg about:null, https://www.google.com
 	* @param {String} meta.origin - Proxy server origin eg https://localhost:7080
 	* @param {Object} [options]
-	* @param {Boolean} [options.snippet] - Determines if code should be injected
+	* @param {Boolean} [options.inline] - Determines if code should be injected
 	* @returns {String} Processed URL
 	*/
 	html(value, meta, options = {}){
@@ -583,7 +604,7 @@ class rewriter {
 		
 		value = value.toString();
 		
-		var parsed = parse5.parse(options.snippet ? '<pro>' + value + '</pro>' : value), head;
+		var parsed = parse5.parse(options.inline ? '<pro>' + value + '</pro>' : value), head;
 		
 		iterate_p5(parsed).forEach(([ parent, node ]) => {
 			if(node.tagName == 'head')head = node;
@@ -631,7 +652,7 @@ class rewriter {
 			if(wnode._removed)parent.splice(parent.indexOf(node), 1);
 		});
 		
-		if(!options.snippet)(head || parsed).childNodes.unshift(...this.inject_head());
+		if(!options.inline)(head || parsed).childNodes.unshift(...this.inject_head());
 		else parsed.childNodes = parsed.childNodes[0].childNodes[1].childNodes[0].childNodes.map(node => (node.parentNode = parsed, node));
 		
 		return parse5.serialize(parsed);
@@ -652,12 +673,12 @@ class rewriter {
 		
 		value = value.toString();
 		
-		var parsed = parse5.parse(options.snippet ? '<pro>' + value + '</pro>' : value), head;
+		var parsed = parse5.parse(options.inline ? '<pro>' + value + '</pro>' : value), head;
 		
 		// remove rw- attribute or remove injected node
 		iterate_p5(parsed).forEach(([ parent, node ]) => node.attrs && (node.attrs.some(attr => attr.name == 'rw-injected') && parent.splice(parent.indexOf(node)) || (node.attrs = node.attrs.filter(attr => !attr.name.startsWith('rw-')))));
 		
-		if(options.snippet)parsed.childNodes = parsed.childNodes[0].childNodes[1].childNodes[0].childNodes.map(node => (node.parentNode = parsed, node));
+		if(options.inline)parsed.childNodes = parsed.childNodes[0].childNodes[1].childNodes[0].childNodes.map(node => (node.parentNode = parsed, node));
 		
 		return parse5.serialize(parsed);
 	}
@@ -757,7 +778,7 @@ class rewriter {
 				
 				wnode_setAttribute('rw-' + data.name, data.value);
 				
-				wnode_setAttribute(data.name, this.html(data.value, meta, { snippet: true }));
+				wnode_setAttribute(data.name, this.html(data.value, meta, { inline: true }));
 				
 				break;
 			default:

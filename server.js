@@ -197,7 +197,7 @@ module.exports = class extends require('./index.js') {
 						}catch(err){
 							console.error(err);
 							
-							return res.error(err);
+							return res.error(500, err);
 						}
 						
 						res.send(parsed);
