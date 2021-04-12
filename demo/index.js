@@ -8,10 +8,10 @@ var fs = require('fs'),
 		port: config.port,
 		address: config.address,
 		static: path.join(__dirname, 'public'),
-		ssl: config.ssl ? {
+		ssl: typeof config.ssl == 'object' && config.ssl != null ? {
 			key: fs.readFileSync(path.join(__dirname, 'ssl.key'), 'utf8'),
 			cert: fs.readFileSync(path.join(__dirname, 'ssl.crt'), 'utf8'),
-		} : false,
+		} : undefined,
 		log_ready: true,
 	}),
 	rw = new rewriter({
