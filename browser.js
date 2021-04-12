@@ -410,7 +410,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 							return rewriter.decode_source(desc.get.call(this) || '', meta());
 						},
 						set(value){
-							return desc.set.call(this, rewriter.js(value || '', meta()));
+							return desc.set.call(this, rewriter.js(value || '', meta(), { inline: true }));
 						},
 					}),
 					style_handler = desc => ({
@@ -420,36 +420,36 @@ var rw_bundle = this && arguments.callee.caller.caller,
 						set(value){
 							return desc.set.call(this, rewriter.css(value || '', meta()));
 						},
-					});
-				
-				defineProperties(global.HTMLScriptElement.prototype, {
-					text: script_handler(getOwnPropertyDescriptor(global.HTMLScriptElement.prototype, 'text')),
-					innerHTML: script_handler(getOwnPropertyDescriptor(global.Element.prototype, 'innerHTML')),
-					innerText: script_handler(getOwnPropertyDescriptor(global.HTMLElement.prototype, 'innerText')),
-					outerText: style_handler(getOwnPropertyDescriptor(global.HTMLElement.prototype, 'innerText')),
-					textContent: script_handler(getOwnPropertyDescriptor(global.Node.prototype, 'textContent')),
-				});
-				
-				defineProperties(global.HTMLStyleElement.prototype, {
-					innerHTML: style_handler(getOwnPropertyDescriptor(global.Element.prototype, 'innerHTML')),
-					innerText: style_handler(getOwnPropertyDescriptor(global.HTMLElement.prototype, 'innerText')),
-					outerText: style_handler(getOwnPropertyDescriptor(global.HTMLElement.prototype, 'innerText')),
-					textContent: style_handler(getOwnPropertyDescriptor(global.Node.prototype, 'textContent')),
-				});
-				
-				var html_handler = desc => ({
-					get(){
-						return rewriter.unhtml((desc.get.call(this) || '') + '', meta(), { inline: true });
+					}),
+					html_handler = desc => ({
+						get(){
+							return rewriter.unhtml((desc.get.call(this) || '') + '', meta(), { inline: true });
+						},
+						set(value){
+							return desc.set.call(this, rewriter.html((value || '') + '', meta(), { inline: true }));
+						},
+					}),
+					script = {
+						text: script_handler(getOwnPropertyDescriptor(global.HTMLScriptElement.prototype, 'text')),
+						innerHTML: script_handler(getOwnPropertyDescriptor(global.Element.prototype, 'innerHTML')),
+						innerText: script_handler(getOwnPropertyDescriptor(global.HTMLElement.prototype, 'innerText')),
+						outerText: style_handler(getOwnPropertyDescriptor(global.HTMLElement.prototype, 'innerText')),
+						textContent: script_handler(getOwnPropertyDescriptor(global.Node.prototype, 'textContent')),
 					},
-					set(value){
-						return desc.set.call(this, rewriter.html((value || '') + '', meta(), { inline: true }));
+					style = {
+						innerHTML: style_handler(getOwnPropertyDescriptor(global.Element.prototype, 'innerHTML')),
+						innerText: style_handler(getOwnPropertyDescriptor(global.HTMLElement.prototype, 'innerText')),
+						outerText: style_handler(getOwnPropertyDescriptor(global.HTMLElement.prototype, 'innerText')),
+						textContent: style_handler(getOwnPropertyDescriptor(global.Node.prototype, 'textContent')),
 					},
-				});
+					html = {
+						innerHTML: html_handler(getOwnPropertyDescriptor(global.Element.prototype, 'innerHTML')),
+						outerHTML: html_handler(getOwnPropertyDescriptor(global.Element.prototype, 'outerHTML')),
+					};
 				
-				defineProperties(global.Element.prototype, {
-					innerHTML: html_handler(getOwnPropertyDescriptor(global.Element.prototype, 'innerHTML')),
-					outerHTML: html_handler(getOwnPropertyDescriptor(global.Element.prototype, 'outerHTML')),
-				});
+				defineProperties(global.Element.prototype, html);
+				defineProperties(global.HTMLScriptElement.prototype, script);
+				defineProperties(global.HTMLStyleElement.prototype, style);
 				
 				var titles = new Map(),
 					title = getOwnPropertyDescriptor(global.Document.prototype, 'title').get;
