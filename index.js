@@ -90,8 +90,8 @@ var css = require('css-tree'),
 		}
 		remove(){
 			this._removed = true;
-			/*if(this.parentIndex == -1)return;
-			this.parentNode.childNodes.splice(this.parentIndex, 1);*/
+			if(this.parentIndex == -1)return;
+			this.parentNode.childNodes.splice(this.parentIndex, 1);
 		}
 		get textContent(){
 			var text = [];
@@ -692,7 +692,7 @@ class rewriter {
 			
 			wnode.getAttributeNames().forEach(name => this.attribute(node, name, wnode.getAttribute(name), meta));
 			
-			if(wnode._removed)console.trace('removed'); // parent.splice(parent.indexOf(node), 1);
+			// if(wnode._removed)console.trace('removed'); // parent.splice(parent.indexOf(node), 1);
 		});
 		
 		if(!options.inline)head.childNodes.unshift(...this.inject_head());
