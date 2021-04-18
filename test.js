@@ -10,7 +10,7 @@ var util = require('util'),
 			prefix: '/proxy',
 		}).html(value, {
 			origin: 'http://localhost:8080',
-			base: 'http://example.org',
+			base: 'http://domain.tld',
 		}, { inline: inline });
 	},
 	unhtml = (value, inline = true) => {
@@ -23,8 +23,28 @@ var util = require('util'),
 			prefix: '/proxy',
 		}).unhtml(value, {
 			origin: 'http://localhost:8080',
-			base: 'http://example.org',
+			base: 'http://domain.tld',
 		}, { inline: inline });
+	},
+	diff_init = function(){
+		_interface.clear();
+		
+		_interface.write('\n\nProcessing...');
+		
+		var time = perf_hooks.performance.now(),
+			input = this.list_data.repeat(1000),
+			result = html(input);
+		
+		this.list_data = [ perf_hooks.performance.now() - time, Buffer.byteLength(input), Buffer.byteLength(result) ];
+	},
+	diff_update = function(){
+		var diff = this.list_data[2] - this.list_data[1],	
+			perc = ~~((diff / this.list_data[1]) * 100),
+			result = this.list_data[2] + '',
+			input = (this.list_data[1] + '').padStart(result.length, ' '),
+			ms = (this.list_data[0] / 1000).toFixed(2);
+		
+		return `Input size : ${input} bytes\nResult size: ${result} bytes\n\nDifference: ${diff} bytes (${perc}%)\n\nTime: ${ms}s`
 	},
 	leaksret = (snippet, inline = true) => ({
 		list_init(){
@@ -75,70 +95,27 @@ ${restored}`;
 		Performance: {
 			list_title: 'Performance related tests',
 			'Massive set of images': {
-				list_init(){
-					interfac.clear();
-					
-					interfac.write('\n\nProcessing...');
-					
-					var time = perf_hooks.performance.now(),
-						link = 'https://www.google.com' + '/link'.repeat(1000),
-						input = `<img src=${JSON.stringify(link)}>`.repeat(1000),
-						result = html(input);
-					
-					this.list_data = [ perf_hooks.performance.now() - time, Buffer.byteLength(input), Buffer.byteLength(result) ];
-				},
-				list_update(){
-					var diff = this.list_data[2] - this.list_data[1],	
-						perc = ~~((diff / this.list_data[1]) * 100),
-						result = this.list_data[2] + '',
-						input = (this.list_data[1] + '').padStart(result.length, ' '),
-						ms = (this.list_data[0] / 1000).toFixed(2);
-					
-					return `Input size : ${input} bytes\nResult size: ${result} bytes\n\nDifference: ${diff} bytes (${perc}%)\n\nTime: ${ms}s`
-				}
+				list_data: `<img src="http://domain.tld/image.png">`,
+				list_init: diff_init,
+				list_update: diff_update,
 			},
 			'Massive set of scripts': {
-				list_init(){
-					interfac.clear();
-					
-					interfac.write('\n\nProcessing...');
-					
-					var time = perf_hooks.performance.now(),
-						link = 'https://www.google.com' + '/link'.repeat(1000),
-				input = `<script>
+				list_data: `<script>
 if(parent.location.href != window["loc" + (1 ? "at" : "asdjka") + "ion"].href){
 	alert("Running in an iframe!");
 	
-	location.assign("https://sys32.dev");
+	location.assign("http://domain.tld");
 }else{
 	localStorage.setItem("key", "value");
 	
 	this["locat" + (1 ? "ion" : "er")].assign("/");
 }
-</script>`.repeat(1000),
-						result = html(input);
-					
-					this.list_data = [ perf_hooks.performance.now() - time, Buffer.byteLength(input), Buffer.byteLength(result) ];
-				},
-				list_update(){
-					var diff = this.list_data[2] - this.list_data[1],	
-						perc = ~~((diff / this.list_data[1]) * 100),
-						result = this.list_data[2] + '',
-						input = (this.list_data[1] + '').padStart(result.length, ' '),
-						ms = (this.list_data[0] / 1000).toFixed(2);
-					
-					return `Input size : ${input} bytes\nResult size: ${result} bytes\n\nDifference: ${diff} bytes (${perc}%)\n\nTime: ${ms}s`
-				}
+</script>`,
+				list_init: diff_init,
+				list_update: diff_update,
 			},
 			'Massive set of styles': {
-				list_init(){
-					interfac.clear();
-					
-					interfac.write('\n\nProcessing...');
-					
-					var time = perf_hooks.performance.now(),
-						link = 'https://www.google.com' + '/link'.repeat(1000),
-				input = `<div class="image-test"></div>
+				list_data: `<div class="image-test"></div>
 
 <style>
 * {
@@ -153,20 +130,9 @@ if(parent.location.href != window["loc" + (1 ? "at" : "asdjka") + "ion"].href){
 	content: ' ';
 	background: url("/image.png");
 }
-</style>`.repeat(1000),
-						result = html(input);
-					
-					this.list_data = [ perf_hooks.performance.now() - time, Buffer.byteLength(input), Buffer.byteLength(result) ];
-				},
-				list_update(){
-					var diff = this.list_data[2] - this.list_data[1],	
-						perc = ~~((diff / this.list_data[1]) * 100),
-						result = this.list_data[2] + '',
-						input = (this.list_data[1] + '').padStart(result.length, ' '),
-						ms = (this.list_data[0] / 1000).toFixed(2);
-					
-					return `Input size : ${input} bytes\nResult size: ${result} bytes\n\nDifference: ${diff} bytes (${perc}%)\n\nTime: ${ms}s`
-				}
+</style>`,
+				list_init: diff_init,
+				list_update: diff_update,
 			},
 			
 		},
@@ -210,7 +176,7 @@ if(parent.location.href != window["loc" + (1 ? "at" : "asdjka") + "ion"].href){
 			process.exit();
 		},
 	},
-	interfac = ({
+	_interface = ({
 		constructor(entries){
 			var readline = require('readline');
 			
