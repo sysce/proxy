@@ -7,15 +7,11 @@ var fs = require('fs'),
 	server = new nodehttp.server({
 		port: config.port,
 		address: config.address,
-		ssl: config.ssl == 'object' && config.ssl != null ? {
-			key: fs.readFileSync(path.join(__dirname, 'ssl.key'), 'utf8'),
-			cert: fs.readFileSync(path.join(__dirname, 'ssl.crt'), 'utf8'),
-		} : undefined,
 		log_ready: true,
 	}),
 	rw = new rewriter({
 		prefix: '/service',
-		codec: rewriter.codec.xor,
+		// codec: rewriter.codec.xor,
 		server: server,
 		title: 'Service',
 		interface: config.interface,
@@ -64,14 +60,15 @@ window[test] = other[prop]++;
 console.log(rw.css('img[src*="/test"]', { base: 'about:null', origin: 'about:null' }));
 console.log(rw.css('img[src*="/test"] {}', { base: 'about:null', origin: 'about:null' }));
 console.log(rw.html('<p>test</p>', { base: 'about:null', origin: 'about:null' }, { inline: true }));
-*/
 console.log(rw.css(`img[src*="/test"] {}
 
 test[fake*="1"] {
 	
 }
 `, { base: 'about:null', origin: 'about:null' }));
+
 console.log(rw.js(`window[test][window[ok]++]`, { base: 'about:null', origin: 'about:null' }));
+*/
 
 server.alias('/gateway', '/gateway.php');
 server.alias('/prox', '/gateway.php');

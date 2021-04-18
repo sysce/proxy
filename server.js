@@ -10,59 +10,7 @@ var fs = require('fs'),
 	webpack = require('webpack'),
 	cookies = require('./cookies'),
 	nodehttp = require('sys-nodehttp'),
-	WebSocket = require('ws'),
-	sqlite3 = class extends require('sqlite3').Database {
-		constructor(...args){
-			var callback = typeof args.slice(-1)[0] == 'function' && args.splice(-1)[0],
-				promise = new Promise((resolve, reject) => super(...args, err => {
-					var ind = this.wqueue.unknown.indexOf(promise);
-					
-					if(ind != -1)this.wqueue.unknown.splice(ind, 1);
-					
-					if(err)reject(err);
-					else resolve();
-				}));
-			
-			this.wqueue = { unknown: [ promise ] };
-		}
-		promisify(prop, [ query, ...args ]){
-			var	split = query.split(' '),
-				table = split.indexOf('from');
-			
-			if(table == -1)table = split.indexOf('into');
-			
-			if(table != -1)table = split[table + 1];
-			else table = 'unknown';
-			
-			if(!this.wqueue[table])this.wqueue[table] = [];
-			
-			var promise = new Promise((resolve, reject) => Promise.allSettled(this.wqueue[table]).then(() => {
-					var start = Date.now(), time;
-					
-					super[prop](query, ...args, (err, row, ind) => ((ind = this.wqueue[table].indexOf(promise)) != -1 && this.wqueue[table].splice(ind, 1), err ? reject(err) : resolve(row)));
-					
-					// console.error(query, '\n', err)
-					
-					time = Date.now() - start;
-					
-					if(time > 100)console.log(query + '\ntook ' + time + 'ms to execute, consider optimizing');
-				}));
-			
-			this.wqueue[table].push(promise);
-			
-			return promise;
-		}
-		get(...args){
-			return this.promisify('get', args);
-		}
-		all(...args){
-			return this.promisify('all', args);
-		}
-		run(...args){
-			return this.promisify('run', args);
-		}
-	};
-	// data = new sqlite3(path.join(__dirname, 'data.db'));
+	WebSocket = require('ws');
 
 module.exports = class extends require('./index.js') {
 	constructor(config){
@@ -104,39 +52,6 @@ module.exports = class extends require('./index.js') {
 				});
 			});
 			
-			this.config.server.use(this.config.prefix, async (req, res, next) => {
-				req.meta_id = req.cookies.proxy_id;
-				
-				if(!req.meta_id)res.headers.append('set-cookie', 'proxy_id=' + (req.meta_id = await this.bytes()) + '; expires=' + new Date(Date.now() + 54e8).toGMTString());
-				
-				next();
-			});
-			
-			this.config.server.post(this.config.prefix + '/cookie', async (req, res) => {
-				/*
-				var meta = { id: req.meta_id, url: this.valid_url(req.body.url) };
-				
-				// only works if table exists
-				if(!meta.id || !(await data.run(`select * from "${meta.id}";`).then(() => true).catch(err => false)) || !meta.url || !req.body.value)return res.error(400, 'Invalid body');
-				
-				var parsed = cookies.parse_object(req.body.value, true);
-				
-				for(var name in parsed){
-					var cookie = parsed[name],
-						domain = cookie.domain || meta.url.host,
-						got = await data.get(`select * from "${meta.id}" where domain = ?`, domain).catch(() => false),
-						existing = got ? cookies.parse_object(got.value, true) : {};
-					
-					existing[name] = cookie;
-					
-					delete existing[name].name;
-					
-					await data.run(`insert or replace into "${meta.id}" (domain,value,access) values (?, ?, ?)`, got ? got.domain : domain, cookies.format_object(existing).join(' '), Date.now());
-				}
-				*/
-				res.status(200).end();
-			});
-			
 			this.config.server.get(this.config.prefix + '/favicon', async (req, res) => res.contentType('image/png').send(Buffer.from('R0lGODlhAQABAAD/ACwAAAAAAQABAAA', 'base64')));
 			
 			this.config.server.use(this.config.prefix + '/', nodehttp.static(this.webpack.options.output.path, {
@@ -147,20 +62,17 @@ module.exports = class extends require('./index.js') {
 				},
 			}));
 			
-			this.config.server.all(this.config.prefix + '*', async (req, res) => {
+			this.config.server.all(this.config.prefix + '*', async (req, res, next) => {
 				var url = this.valid_url(this.unurl(req.url.href, this.empty_meta));
 				
-				if(!url)return;
+				if(!url || !this.protocols.includes(url.protocol))return next('bad source url');
 				
-				var meta = { url: url, origin: req.url.origin, base: url.href, id: req.meta_id },
+				var meta = { url: url, origin: req.url.origin, base: url.href },
 					failure,
-					timeout = setTimeout(() => !res.body_sent && (failure = true, res.error(500, 'Timeout')), this.config.timeout);
+					timeout = setTimeout(() => !res.body_sent && (failure = true, res.error(500, 'Timeout')), this.config.timeout),
+					ip = await dns.promises.lookup(url.hostname).catch(err => (failure = true, res.error(400, err)));
 				
-				if(!url || !this.protocols.includes(url.protocol))return res.redirect('/');
-				
-				var ip = await dns.promises.lookup(url.hostname).catch(err => (failure = true, res.error(400, err)));
-				
-				if(failure)return;
+				if(failure)return next(failure);
 				
 				if(ip.address.match(this.regex.url.ip))return res.error(403, 'Forbidden IP');
 				
@@ -172,14 +84,14 @@ module.exports = class extends require('./index.js') {
 					port: url.port,
 					protocol: url.protocol,
 					localAddress: this.config.interface,
-					headers: await this.headers_encode(req.headers, meta),
+					headers: this.headers_encode(req.headers, meta),
 					method: req.method,
 				}, async resp => {
 					var dest = req.headers['sec-fetch-dest'],
 						decoded = this.decode_params(req.url),
 						content_type = (resp.headers['content-type'] || '').split(';')[0],
 						route = decoded.get('route'),
-						dec_headers = await this.headers_decode(resp.headers, meta);
+						dec_headers = this.headers_decode(resp.headers, meta);
 					
 					res.status(resp.statusCode);
 					
@@ -219,51 +131,42 @@ module.exports = class extends require('./index.js') {
 					res.error(400, err);
 				}).end(req.raw_body);
 			});
-		}
-		
-		if(this.config.ws){
-			var wss = new WebSocket.Server({ server: this.config.server.server });
 			
-			wss.on('connection', async (cli, req) => {
-				var req_url = new this.URL(req.url, new this.URL('wss://' + req.headers.host)),
-					url = this.unurl(req_url.href, this.empty_meta),
-					cookis = cookies.parse_object(req.headers.cookie),
-					meta = { url: url, origin: req_url.origin, base: url, id: cookis.proxy_id };
+			if(this.config.ws){
+				var wss = new WebSocket.Server({ server: this.config.server.server });
 				
-				if(!url)return cli.close();
-				
-				var headers = await this.headers_encode(new nodehttp.headers(req.headers), meta),
-					srv = new WebSocket(url, cli.protocol, {
-						headers: headers,
-						agent: ['wss:', 'https:'].includes(url.protocol) ? this.config.https_agent : this.config.http_agent,
-					}),
-					time = 8000,
-					queue = [];
-				
-				srv.on('error', err => console.error(headers, url.href, util.format(err)) + cli.close());
-				
-				cli.on('message', data => srv.readyState == WebSocket.OPEN && srv.send(data));
-				
-				cli.on('close', code => (srv.readyState == WebSocket.OPEN && srv.close()));
-				
-				srv.on('open', () => {
-					cli.send('open');
+				// use native alternative, websocket server cannot send back 404 if a 404 is recieved from connected server
+				// active instances often show /itsgonnafail on domains throwing an error which may be a red flag that the site is under a proxy
+				wss.on('connection', async (cli, req) => {
+					var req_url = new this.URL(req.url, new this.URL('wss://' + req.headers.host)),
+						url = this.unurl(req_url.href, this.empty_meta),
+						cookis = cookies.parse_object(req.headers.cookie),
+						meta = { url: url, origin: req_url.origin, base: url, id: cookis.proxy_id };
 					
-					srv.on('message', data => cli.send(data));
+					if(!url)return cli.close();
+					
+					var srv = new WebSocket(url, cli.protocol, {
+							headers: this.headers_encode(new nodehttp.headers(req.headers), meta),
+							agent: ['wss:', 'https:'].includes(url.protocol) ? this.config.https_agent : this.config.http_agent,
+						}),
+						time = 8000,
+						queue = [];
+					
+					cli.on('message', data => srv.readyState == WebSocket.OPEN && srv.send(data)).on('close', code => (srv.readyState == WebSocket.OPEN && srv.close()));
+					
+					srv.on('open', () => cli.send('sp$0')).on('message', data => cli.send(data)).on('close', code => cli.close()).on('error', err => {
+						// client should read then close
+						cli.send('sp$1');
+						
+						console.log('error at ' + url.href);
+						console.error(err);
+					});
 				});
-				
-				srv.on('close', code => cli.close());
-			});
+			}
 		}
 	}
-	async headers_encode(headers, meta){
-		// prepare headers to be sent to a request url
-		
-		// meta.id is hex, has no quotes so it can be wrapped in ""
-		var out = {},
-			existing = []; // meta.id && await data.all(`select * from "${meta.id}" where domain = ?1 or ?1 like ('%' || domain)`, [ meta.url.host ]).catch(err => []);
-		
-		out.cookie = existing.map(domain => domain.value).join(' ');
+	headers_encode(headers, meta){
+		var out = {};
 		
 		headers.forEach((value, header) => {
 			switch(header.toLowerCase()){
@@ -300,7 +203,7 @@ module.exports = class extends require('./index.js') {
 		
 		return out;
 	}
-	async headers_decode(value, meta){
+	headers_decode(value, meta){
 		var out = {};
 		
 		for(var header in value){
@@ -309,24 +212,6 @@ module.exports = class extends require('./index.js') {
 			
 			switch(header.toLowerCase()){
 				case'set-cookie':
-					
-					/*var domains = await data.all(`select * from "${meta.id}"`).catch(err => (data.run(`create table if not exists "${meta.id}" (
-						domain text primary key not null,
-						value text,
-						access integer not null
-					)`), []));
-					
-					for(var ind in arr){
-						var parsed = cookies.parse_object(val, true);
-						
-						for(var name in parsed){
-							var cookie = parsed[name],
-								domain = cookie.domain || meta.url.host,
-								got = domains.find(data => data.domain == domain) || { domain: domain, value: '' };
-							
-							data.run(`insert or replace into "${meta.id}" (domain,value,access) values (?, ?, ?)`, got.domain, cookies.format_object(Object.assign(cookies.parse_object(got.value, true), { [name]: cookie })), Date.now());
-						};
-					};*/
 					
 					break;
 				case'location':
@@ -342,7 +227,8 @@ module.exports = class extends require('./index.js') {
 			}
 		};
 		
-		out['referrer-policy'] = 'unsafe-url'; // soooo sus!!!
+		// full referrer
+		out['referrer-policy'] = 'unsafe-url';
 		
 		return out;
 	}
@@ -372,7 +258,4 @@ module.exports = class extends require('./index.js') {
 			res.on('data', chunk => chunks.push(chunk)).on('end', () => resolve(Buffer.concat(chunks))).on('error', err => console.error(err) + resolve(Buffer.concat(chunks)));
 		});
 	}
-	bytes(){
-		return new Promise((resolve, reject) => crypto.randomBytes(32, (err, buf) => err ? reject(err) : resolve(buf.toString('hex'))));
-	}
-}
+};

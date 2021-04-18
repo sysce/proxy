@@ -4,11 +4,9 @@ var css = require('css-tree'),
 	parse5 = require('parse5'),
 	esotope = require('./esotope'),
 	browser = typeof window != 'undefined',
-	iterate_p5 = (node, out = [ [ [ node ], 0 ] ]) => {
-		// [ parent, index ]
-		if(node.childNodes)for(var ind = 0; ind < node.childNodes.length; ind++)out.push([ node.childNodes, node.childNodes[ind] ]), iterate_p5(node.childNodes[ind], out);
-		
-		return out;
+	iterate_p5 = (node, callback) => {
+		callback(node);
+		if(node.childNodes)for(var ind = 0; ind < node.childNodes.length; ind++)iterate_p5(node.childNodes[ind], callback);
 	},
 	iterate_est = (obj, arr = []) => {
 		for(var prop in obj)if(!(['parent', 'original'].includes(prop)) && typeof obj[prop] == 'object' && obj[prop] != null){
@@ -96,13 +94,18 @@ var css = require('css-tree'),
 			this.parentNode.childNodes.splice(this.parentIndex, 1);*/
 		}
 		get textContent(){
-			return iterate_p5(this).map(([ par, node ]) => node.nodeName == '#text' ? node.value : null).filter(x => x).join(' ');
+			var text = [];
+			
+			iterate_p5(this, node => {
+				if(node.nodeName == '#text')text.push(node.value);
+			});
+			
+			return text.join(' ');
 		}
 		set textContent(value){
 			return this.childNodes = [ { nodeName: '#text', value: value, parentNode: this } ];
 		}
 		toJSON(){
-			// console.log(this);
 			return this.data;
 		}
 		get attrs(){
@@ -166,9 +169,6 @@ class rewriter {
 		this.empty_meta = { base: 'http:a', origin: 'about:' };
 		
 		this.regex = {
-			html: {
-				srcset: /(\S+)(\s+\d\S)/g,
-			},
 			url: {
 				proto: /^([^\/]+:)/,
 				host: /(:\/+)_(.*?)_/,
@@ -189,19 +189,50 @@ class rewriter {
 		
 		this.mime_ent = Object.entries(this.mime);
 		
-		this.attr = {
-			inherits_url: ['Image','HTMLObjectElement','StyleSheet','SVGUseElement','SVGTextPathElement','SVGScriptElement','SVGPatternElement','SVGMPathElement','SVGImageElement','SVGGradientElement','SVGFilterElement','SVGFEImageElement','SVGAElement','HTMLTrackElement','HTMLSourceElement','HTMLScriptElement','HTMLMediaElement','HTMLLinkElement','HTMLImageElement','HTMLIFrameElement','HTMLFrameElement','HTMLEmbedElement','HTMLBaseElement','HTMLAreaElement','HTMLAudioElement','HTMLAnchorElement','CSSImportRule'],
-			html: [ [ 'iframe' ], [ 'srcdoc' ] ],
-			css: [ '*', [ 'style' ] ],
-			css_keys: [ 'background', 'background-image', 'src' ],
-			url: [ [ 'line', 'mi', 'math', 'vmlframe ', 'track', 'template', 'source', 'script', 'object', 'media', 'link', 'input', 'image', 'video', 'iframe', 'frame', 'form', 'embed', 'base', 'area', 'anchor', 'a', 'img', 'use' ], [ 'o:href', 'srcset', 'href', 'xlink:href', 'src', 'action', 'content', 'data', 'poster' ] ],
-			// js attrs begin with on
-			del: [ '*', [ 'nonce', 'integrity', 'referrerpolicy' ] ],
-		};
+		/*
+		Scrape significant attributes (run in devtools):
+		
+		console.log(JSON.stringify(Object.fromEntries(Object.values(Object.getOwnPropertyDescriptors(window)).filter(desc => typeof desc.value == 'function' && desc.value.prototype instanceof HTMLElement).map(desc => [desc.value.name, Object.getOwnPropertyNames(desc.value.prototype).filter(key => !(['constructor','toString',Symbol.toStringTag].includes(key))) ])), null, '\t'));
+		*/
+		
+		// svg href tags?
+		
+		this.attr = new Map([
+			[ '*', {
+				css: [ 'style', 'cursor' ],
+				delete: [ 'nonce', 'integrity' ],
+				// todo:
+				// conditions(attrs){
+				// conditions: { rel: 'preload' }
+				// conditions: { rel: [ 'preload' ] },
+			} ],
+			// base already handled, dont add to href
+			[ [ 'font-face-uri', 'image', 'img', 'link', 'a', 'mi', 'math', 'area', 'link', 'use', 'imagedata' ], { url: [ 'o:href', 'xlink:href', 'href' ] } ],
+			[ 'link', { url: 'imagesrcset' } ],
+			[ [ 'body', 'table', 'tr', 'td', 'th', 'caption', 'colgroup', 'thead', 'tfoot', 'tbody' ], { url: 'background' } ],
+			[ 'img', { url: [ 'longdesc', 'dynsrc', 'lowsrc' ] } ],
+			[ 'a', { delete: 'referrerpolicy', url: 'ping' } ],
+			[ 'iframe', { html: 'srcdoc' } ],
+			[ 'video', { url: 'poster' } ],
+			[ [ 'object', 'applet' ], { url: [ 'archive', 'object', 'codebase', 'data' ] } ],
+			[ 'param', { url: 'value' } ],
+			[ 'input', { url: 'formaction' } ],
+			[ 'rect', { css_attr: 'cursor' } ],
+			[ [ 'video', 'portal', 'source', 'image', 'script', 'img', 'vmlframe', 'fill', 'stroke', 'iframe', 'frame' ], { url: 'src' } ],
+			[ 'menuitem', { url: 'icon' } ],
+			[ 'script', { url: 'href' } ],
+			[ 'meta', { url: 'content' } ],
+			[ [ 'source', 'img' ], { url: [ 'srcset' ] } ],
+			
+			[ 'form', { url: 'action' } ],
+			
+			// [ 'track', 'template', 'source', 'script', 'object', 'media', 'link', 'input', 'image', 'video', 'iframe', 'frame', 'form', 'embed', 'base', 'area', 'anchor', 'a', 'img', 'use' ],
+			// [ 'srcset', 'href', 'xlink:href', 'src', 'action', 'content', 'data', 'poster', 'implementation' ],
+		]);
 		
 		this.attr_ent = Object.entries(this.attr);
 		
-		this.protocols = [ 'http:', 'https:', 'ws:', 'wss:' ];
+		this.protocols = [ 'javascript:', 'http:', 'https:', 'ws:', 'wss:' ];
 	}
 	validate_meta(meta){
 		var check = {
@@ -234,11 +265,20 @@ class rewriter {
 		
 		if(typeof value != 'string')throw new TypeError('"constructor" is not type "string" (recieved ' + JSON.stringify(typeof value) + ')');
 		
-		if(value.startsWith('blob:') && options.route == 'js'){
+		if(value.startsWith('blob:') && this[options.route]){
 			var blob = this.blobs.get(value);
 			
 			// capture blob being used for js
-			if(blob)return this.createObjectURL(new Blob([ this.js(this.decode_blob(blob), meta, { route: 'js' }) ]));
+			if(blob)return this.createObjectURL(new Blob([ this[options.route](this.decode_blob(blob), meta) ]));
+		}else if(value.startsWith('javascript:')){
+			return 'javascript:' + this.js(decodeURI(value.substr('javascript:'.length)), meta, { inline: true });
+		}else if(value.startsWith('data:') && this[options.route]){
+			var [ raw_meta, data ] = value.substr('data:'.length).split(','),
+				[ mime, base64 ] = raw_meta.split(';');
+			
+			if(base64 == 'base64')data = rewriter.codec.base64.decode(data);
+			
+			return 'data:' + mime + ';base64,' + rewriter.codec.base64.encode(this[options.route](data, meta));
 		}
 		
 		if(value.match(this.regex.url.proto) && !this.protocols.some(proto => value.startsWith(proto)))return value;
@@ -326,12 +366,6 @@ class rewriter {
 				
 				if(index_node)node.parent[index_node] = newnode;
 				
-				//  && iterate_est(newnode).includes(node[prop])
-				// for(var prop in node)if(!Array.isArray(node[prop]) && node[prop] != null && typeof node[prop] == 'object')node[prop].parent = newnode;
-				
-				// iterate_est(node);
-				// iterate_est(newnode);
-				
 				for(var prop in newnode)if(!Array.isArray(newnode[prop]) && newnode[prop] != null && typeof newnode[prop] == 'object')newnode[prop].parent = newnode;
 				
 				newnode.original = node;
@@ -412,7 +446,7 @@ class rewriter {
 						callee: { type: 'Identifier', name: 'rw$g' },
 						arguments: [ node.object, node.computed ? node.property : { type: 'Literal', value: node.property.name } ].concat(bound),
 						rw_getter: true,
-					}); // , console.log(node.arguments[1].parent == node.arguments);
+					});
 					
 					break;
 			}
@@ -476,10 +510,10 @@ class rewriter {
 		
 		iterate_est(tree).forEach(proc_node);
 		
-		// console.log(tree.body[0].expression);
+		var string = '';
 		
 		try{
-			var string = esotope.generate(tree, false ? { format: {
+			string = esotope.generate(tree, false ? { format: {
 				indent: { style: '', base: 0 },
 				renumber: true,
 				hexadecimal: true,
@@ -491,8 +525,6 @@ class rewriter {
 			} } : {}) + `//# sourceURL=p${this.checksum(value)}\n`;
 		}catch(err){
 			console.error(meta, err);
-			
-			return string;
 		}
 		
 		return (options.inline ? this.encode_source(value, options) : '(typeof importScripts=="function"&&/\\[native code]\\s+}$/.test(importScripts)&&typeof rw$g=="undefined"&&importScripts(location.origin+' + JSON.stringify(this.config.prefix + '/main.js') + '));\n') + string;
@@ -513,7 +545,7 @@ class rewriter {
 		this.validate_meta(meta);
 		
 		try{
-			var tree = css.parse(options.inline ? 'x{' + value + '}' : value),
+			var tree = css.parse(options.attribute ? 'x{' + value + '}' : value),
 				read_string = str => {
 					if(["'", '"'].includes(str[0])){
 						var quote = str[0];
@@ -530,20 +562,19 @@ class rewriter {
 			
 			css.walk(tree, node => {
 				if(node.name == 'import')css.walk(node, node => walk_url(node, 'css'));
-				else if(node.type == 'Url' && node.value && !node.value.rewritten)css.walk(node, walk_url);
+				else if(node.type == 'Url' && !node.value.rewritten)css.walk(node, walk_url);
+				else if(node.type == 'Raw' && /^\s*?url\(/.test(node.value))node.rewritten = true, node.value = 'url(' + JSON.stringify(this.url(node.value.replace(/^\s*?url\(|\)\s*?$/g, ''), meta)) + ')';
 				else if(node.type == 'Selector'){ // not accurate on link[rel] selectors
 					var attr, hnode = { attrs: [] };
 					
 					css.walk(node, snode => {
 						if(snode.type == 'TypeSelector')hnode.tagName = snode.name;
-						else if(snode.type == 'AttributeSelector' && ['del', 'html', 'url'].includes(this.attribute_type(hnode, snode.name.name)))snode.name.name = 'rw-' + snode.name.name;
+						else if(snode.type == 'AttributeSelector' && ['delete', 'html', 'url'].includes(this.attribute_type(hnode, snode.name.name)))snode.name.name = 'rw-' + snode.name.name;
 					});
 				}
 			});
 			
-			var formatted = css.generate(tree);
-			
-			return options.inline ? formatted.slice(2, -1) + this.encode_source(value, options) : formatted;
+			return (options.attribute ? css.generate(tree).slice(2, -1) : css.generate(tree)) + (options.inline ? this.encode_source(value, options) : '');
 		}catch(err){
 			console.error(err);
 			return value;
@@ -551,22 +582,29 @@ class rewriter {
 		
 		return value;
 	}
+	css_attr(value, meta){
+		// cursor="url('x')"
+		return this.css('attr:' + value, meta, { attribute: true }).substr(5);
+	}
+	/**
+	* Adds comment holding original code
+	* @param {String} value - Input JS/CSS
+	* @param {Object} [options]
+	* @param {Object} [options.source] - Source code to encode
+	* @returns {String} Raw code
+	*/
 	encode_source(value, options){
-		return options.source == false ? '' : '/*RW_PRS' + module.exports.codec.base64.encode(encodeURI(options.source || value)) + 'RW_PRS*/';
+		return options.source == false ? '' : '/*RW_PRS' + rewriter.codec.base64.encode(encodeURI(options.source || value)) + 'RW_PRS*/';
 	}
 	/**
 	* Undos rewriting
 	* @param {String} value - Input JS/CSS
-	* @param {Object} meta - Metadata (location, etc)
-	* @param {String} meta.base - Base when creating a url that is not proxied eg about:null, https://www.google.com
-	* @param {String} meta.origin - Proxy server origin eg https://localhost:7080
-	* @param {Object} [options]
 	* @returns {String} Raw code
 	*/
-	decode_source(value, meta, options = {}){
+	decode_source(value){
 		var found = value;
 		
-		value.replace(/\/\*RW_PRS([A-Za-z0-9+/=]*?)RW_PRS\*\//g, (match, code) => found = decodeURI(module.exports.codec.base64.decode(code)));
+		value.replace(/\/\*RW_PRS([A-Za-z0-9+/=]*?)RW_PRS\*\//g, (match, code) => found = decodeURI(rewriter.codec.base64.decode(code)));
 		
 		return found;
 	}
@@ -604,12 +642,15 @@ class rewriter {
 		
 		value = value.toString();
 		
-		var parsed = parse5.parse(options.inline ? '<pro>' + value + '</pro>' : value), head;
+		var parsed = options.inline ? parse5.parseFragment(value) : parse5.parse(value),
+			head = parsed; // injected head should be set by iteration or appended to document 
 		
-		iterate_p5(parsed).forEach(([ parent, node ]) => {
+		iterate_p5(parsed, node => {
 			if(node.tagName == 'head')head = node;
 			
 			var wnode = new parse5_node_wrapper(node);
+			
+			if(node.nodeName == '#documentType' && node.systemId)node.systemId = this.url(node.systemId, meta, { route: 'xml' });
 			
 			switch(node.tagName){
 				case'title':
@@ -627,7 +668,9 @@ class rewriter {
 						if(valid)meta.base = valid.href;
 					}
 					
-					wnode.remove();
+					wnode.setAttribute('rw-href', href);
+					
+					wnode.removeAttribute('href');
 					
 					break;
 				case'script':
@@ -649,11 +692,10 @@ class rewriter {
 			
 			wnode.getAttributeNames().forEach(name => this.attribute(node, name, wnode.getAttribute(name), meta));
 			
-			if(wnode._removed)parent.splice(parent.indexOf(node), 1);
+			if(wnode._removed)console.trace('removed'); // parent.splice(parent.indexOf(node), 1);
 		});
 		
-		if(!options.inline)(head || parsed).childNodes.unshift(...this.inject_head());
-		else parsed.childNodes = parsed.childNodes[0].childNodes[1].childNodes[0].childNodes.map(node => (node.parentNode = parsed, node));
+		if(!options.inline)head.childNodes.unshift(...this.inject_head());
 		
 		return parse5.serialize(parsed);
 	}
@@ -673,12 +715,25 @@ class rewriter {
 		
 		value = value.toString();
 		
-		var parsed = parse5.parse(options.inline ? '<pro>' + value + '</pro>' : value), head;
+		var parsed = options.inline ? parse5.parseFragment(value) : parse5.parse(value);
 		
-		// remove rw- attribute or remove injected node
-		iterate_p5(parsed).forEach(([ parent, node ]) => node.attrs && (node.attrs.some(attr => attr.name == 'rw-injected') && parent.splice(parent.indexOf(node)) || (node.attrs = node.attrs.filter(attr => !attr.name.startsWith('rw-')))));
-		
-		if(options.inline)parsed.childNodes = parsed.childNodes[0].childNodes[1].childNodes[0].childNodes.map(node => (node.parentNode = parsed, node));
+		iterate_p5(parsed, node => {
+			if(node.attrs){
+				// injected node, remove entire node
+				if(node.attrs.some(attr => attr.name == 'rw-injected') && node.parentNode && node.parentNode.childNodes)return node.parentNode.childNodes.splice(node.parentNode.childNodes.indexOf(node), 1);
+				
+				node.attrs = node.attrs.map(attr => {
+					if(attr.name.startsWith('rw-'))return false;
+					
+					var identical = node.attrs.find(sattr => sattr.name == 'rw-' + attr.name);
+					
+					if(identical)attr.value = identical.value;
+					else if(attr.value)attr.value = this.decode_source(attr.value);
+					
+					return attr;
+				}).filter(attr => attr);
+			}
+		});
 		
 		return parse5.serialize(parsed);
 	}
@@ -687,13 +742,24 @@ class rewriter {
 		else if(data.tag == 'link'){ // link tags
 			if(data.rel.includes('stylesheet'))return 'css';
 			else if(data.rel.includes('manifest'))return 'manifest';
-			// else console.log(data);
 		}else if(data.tag == 'script' && data.name == 'src')return 'js';
 		
 		return false;
 	}
+	attribute_map(name, tag){
+		var result = 'unknown';
+		
+		this.attr.forEach((value, labels) => {
+			if((Array.isArray(labels) ? labels : [ labels ]).some(label => [ '*', tag ].includes(label)))for(var type in value)if((Array.isArray(value[type]) ? value[type] : [ value[type] ]).includes(name))result = type;
+		});
+		
+		return result;
+		// (this.attr_ent.find(x => (x[1][0] == '*' || x[1][0].includes(tag)) && x[1][1].includes(name))||[])[0]
+	}
 	attribute_type(node, name, wnode_getAttribute, wnode_setAttribute){
 		var wnode = typeof global.Node == 'function' && node instanceof global.Node ? node : new parse5_node_wrapper(node);
+		
+		name = name.toLowerCase();
 		
 		wnode_setAttribute = (wnode_setAttribute || wnode.setAttribute).bind(wnode);
 		wnode_getAttribute = (wnode_getAttribute || wnode.getAttribute).bind(wnode);
@@ -707,7 +773,7 @@ class rewriter {
 			tag == 'meta' && name == 'content' && (['og:url','twitter:url'].includes(wnode.getAttribute('property') || wnode_getAttribute('itemprop') == 'image' || (wnode_getAttribute('name') || '').includes('image') || wnode_getAttribute('name') == 'url'))
 		)return 'url';
 		else if(/^on[a-zA-Z]+$/.test(name))return 'js';
-		else return (this.attr_ent.find(x => (x[1][0] == '*' || x[1][0].includes(tag)) && x[1][1].includes(name))||[])[0]
+		else return this.attribute_map(name, tag);
 	}
 	unattribute(node, attr, value, meta, wnode_getAttribute, wnode_setAttribute){
 		var wnode = typeof global.Node == 'function' && node instanceof global.Node ? node : new parse5_node_wrapper(node);
@@ -719,6 +785,16 @@ class rewriter {
 		
 		return wnode.hasAttribute('rw-' + attr) ? wnode.getAttribute('rw-' + attr) : value ? this.decode_source(value, meta) : value;
 	}
+	srcset(value, meta){
+		return value.trim().split(/,\s*?/).map((part, index) => {
+			var split = part.split(/\s+/);
+			
+			if(split[0])split[0] = this.url(split[0], meta);
+			
+			return split.join(' ');
+		}).join(', ');
+	}
+	
 	attribute(node, name, value, meta, wnode_getAttribute, wnode_setAttribute){
 		var wnode = typeof global.Node == 'function' && node instanceof global.Node ? node : new parse5_node_wrapper(node);
 		
@@ -741,28 +817,27 @@ class rewriter {
 		// rel can be set after href and cause issues
 		if(data.name == 'rel' && data.tag == 'link' && data.href)data.modify.push([ { name:	'href', value: this.url(this.unurl(data.href.value), meta, { route: this.attribute_route(Object.assign({}, data, { name: 'href' })) }) } ]);*/
 		
+		// if(wnode.getAttribute('http-equiv') && wnode.getAttribute('http-equiv').toLowerCase() == 'refresh'){
+		
 		switch(data.type){
 			case'url':
 				
 				wnode_setAttribute('rw-' + data.name, data.value);
 				
-				wnode_setAttribute(data.name, data.tag == 'link' && data.rel.includes('icon') ? '/service/favicon' : data.name == 'srcset'
-					? data.value.replace(this.regex.html.srcset, (m, url, size) => this.url(url, meta) + size)
-					: name == 'xlink:href' && data.value.startsWith('#')
-						? data.value
-						: this.url(data.value, meta, { route: this.attribute_route(data) }));
+				wnode_setAttribute(data.name, data.tag == 'link' && data.rel.includes('icon') ? '/service/favicon' : data.name == 'srcset' ? this.srcset(data.value, meta) : name == 'xlink:href' && data.value.startsWith('#') ? data.value : this.url(data.value, meta, { route: this.attribute_route(data) }));
 				
 				break;
-			case'del':
+			case'delete':
 				
 				wnode_setAttribute('rw-' + data.name, data.value);
 				
 				wnode.removeAttribute(data.name);
 				
 				break;
+			case'css_attr':
 			case'css':
 				
-				wnode_setAttribute(data.name, this.css(data.value, meta, { inline: true }));
+				wnode_setAttribute(data.name, this[data.type](data.value, meta, { inline: true, attribute: true }));
 				
 				break;
 			case'js':

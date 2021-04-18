@@ -2,6 +2,9 @@ var rw_bundle = this && arguments.callee.caller.caller,
 	cookies = require('./cookies'),
 	_rewriter = class extends require('./index.js') {
 	
+	constructor(config = {}){
+		super(config);
+	}
 	hook_frame(node){
 		if(node.contentWindow)new node.contentWindow.Function('(' + rw_bundle + ')()')();
 	}
@@ -239,13 +242,21 @@ var rw_bundle = this && arguments.callee.caller.caller,
 			
 			if(global.WebSocket)global.WebSocket = class extends global.WebSocket {
 				constructor(url, proto){
-					super(rewriter.url(new URL(url, location).href, meta(), { ws: true }), proto);
+					try{
+						var purl = new URL(url);
+					}catch(err){
+						throw new DOMException(`Failed to construct 'WebSocket': The URL '${url}' is invalid.`);
+					}
 					
-					var open;
+					if(!(['ws:', 'wss:'].includes(purl.protocol)))throw new DOMException(`Failed to construct 'WebSocket': The URL's scheme must be either 'ws' or 'wss'. '${purl.protocol.slice(0, -1)}' is not allowed.`)
 					
+					super(rewriter.url(purl.href, meta(), { ws: true }), proto);
+					
+					// first open event is when connected to the proxy, not the target server
 					this.addEventListener('open', event => event.stopImmediatePropagation(), { once: true });
-					// first packet is always `open`
-					this.addEventListener('message', event => (event.stopImmediatePropagation(), this.dispatchEvent(new Event('open'))), { once: true });
+					
+					// data[3] = int: 0 = open, 1 = error
+					this.addEventListener('message', event => /^sp\$\d$/.test(event.data) && (event.stopImmediatePropagation(), this.dispatchEvent(new Event(+event.data[3] ? (this.close(), 'error') : 'open'))), { once: true });
 				}
 			};
 			
@@ -470,29 +481,28 @@ var rw_bundle = this && arguments.callee.caller.caller,
 							return cookies.format_object(rw_exposed_cookies).join(' ');
 						},
 						set: value => {
-							fetch(this.config.prefix + '/cookie', {
-								headers: {
-									'content-type': 'application/json',
-								},
-								method: 'POST',
-								body: JSON.stringify({
-									url: new URL(meta().base).href,
-									value: value,
-								}),
-							});
-							
 							return cookies.format_object(Object.assign(rw_exposed_cookies, cookies.parse_object(value, true)));
 						},
 					},
 				});
 				
-				this.attr.inherits_url.forEach(prop => {
+				var get_attrs = type => {
+						var attrs = [];
+						
+						this.attr.forEach((types, tags) => types[type] && attrs.push(...(Array.isArray(types[type]) ? types[type] : [ types[type] ])));
+						
+						return attrs;
+					},
+					del_attrs = get_attrs('delete'),
+					url_attrs = get_attrs('url');
+				
+				['Image','HTMLObjectElement','StyleSheet','SVGUseElement','SVGTextPathElement','SVGScriptElement','SVGPatternElement','SVGMPathElement','SVGImageElement','SVGGradientElement','SVGFilterElement','SVGFEImageElement','SVGAElement','HTMLTrackElement','HTMLSourceElement','HTMLScriptElement','HTMLMediaElement','HTMLLinkElement','HTMLImageElement','HTMLIFrameElement','HTMLFrameElement','HTMLEmbedElement','HTMLBaseElement','HTMLAreaElement','HTMLAudioElement','HTMLAnchorElement','CSSImportRule'].forEach(prop => {
 					if(!global[prop])return;
 					
 					var proto = global[prop].prototype,
 						descs = getOwnPropertyDescriptors(proto);
 					
-					this.attr.url[1].forEach(attr => descs.hasOwnProperty(attr) && defineProperty(proto, attr, {
+					url_attrs.forEach(attr => descs.hasOwnProperty(attr) && defineProperty(proto, attr, {
 						get(){
 							var value = this.getAttribute(attr);
 							
@@ -503,7 +513,7 @@ var rw_bundle = this && arguments.callee.caller.caller,
 						},
 					}));
 					
-					this.attr.del[1].forEach((attr, set_val) => (set_val = new Map()) && descs.hasOwnProperty(attr) && defineProperty(proto, attr, {
+					del_attrs.forEach((attr, set_val) => (set_val = new Map()) && descs.hasOwnProperty(attr) && defineProperty(proto, attr, {
 						get(){
 							return set_val.has(this) ? set_val.get(this) : (set_val.set(this, getAttribute.call(this, attr)), set_val.get(this))
 						},
@@ -517,7 +527,12 @@ var rw_bundle = this && arguments.callee.caller.caller,
 				
 				defineProperties(global.HTMLAnchorElement.prototype, fromEntries(['origin', 'protocol', 'username', 'password', 'host', 'hostname', 'port', 'pathname', 'search', 'hash'].map(attr => [ attr, {
 					get(){
-						return new URL(this.getAttribute('href'), meta().base)[attr];
+						try{
+							return new URL(this.getAttribute('href'), meta().base)[attr];
+						}catch(err){
+							console.log(meta().base);
+							return '';
+						}
 					},
 					set(value){
 						var curr = new URL(this.getAttribute('href'));
