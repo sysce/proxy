@@ -1,4 +1,3 @@
-// some tests are from https://github.com/cure53/HTTPLeaks
 'use strict';
 var util = require('util'),
 	html = (value, inline = true) => {
@@ -98,9 +97,81 @@ ${restored}`;
 					return `Input size : ${input} bytes\nResult size: ${result} bytes\n\nDifference: ${diff} bytes (${perc}%)\n\nTime: ${ms}s`
 				}
 			},
+			'Massive set of scripts': {
+				list_init(){
+					interfac.clear();
+					
+					interfac.write('\n\nProcessing...');
+					
+					var time = perf_hooks.performance.now(),
+						link = 'https://www.google.com' + '/link'.repeat(1000),
+				input = `<script>
+if(parent.location.href != window["loc" + (1 ? "at" : "asdjka") + "ion"].href){
+	alert("Running in an iframe!");
+	
+	location.assign("https://sys32.dev");
+}else{
+	localStorage.setItem("key", "value");
+	
+	this["locat" + (1 ? "ion" : "er")].assign("/");
+}
+</script>`.repeat(1000),
+						result = html(input);
+					
+					this.list_data = [ perf_hooks.performance.now() - time, Buffer.byteLength(input), Buffer.byteLength(result) ];
+				},
+				list_update(){
+					var diff = this.list_data[2] - this.list_data[1],	
+						perc = ~~((diff / this.list_data[1]) * 100),
+						result = this.list_data[2] + '',
+						input = (this.list_data[1] + '').padStart(result.length, ' '),
+						ms = (this.list_data[0] / 1000).toFixed(2);
+					
+					return `Input size : ${input} bytes\nResult size: ${result} bytes\n\nDifference: ${diff} bytes (${perc}%)\n\nTime: ${ms}s`
+				}
+			},
+			'Massive set of styles': {
+				list_init(){
+					interfac.clear();
+					
+					interfac.write('\n\nProcessing...');
+					
+					var time = perf_hooks.performance.now(),
+						link = 'https://www.google.com' + '/link'.repeat(1000),
+				input = `<div class="image-test"></div>
+
+<style>
+* {
+	--leak: url("/image.png");
+}
+
+.image-test {
+	background: var(--leak);
+}
+
+.image-test::after {
+	content: ' ';
+	background: url("/image.png");
+}
+</style>`.repeat(1000),
+						result = html(input);
+					
+					this.list_data = [ perf_hooks.performance.now() - time, Buffer.byteLength(input), Buffer.byteLength(result) ];
+				},
+				list_update(){
+					var diff = this.list_data[2] - this.list_data[1],	
+						perc = ~~((diff / this.list_data[1]) * 100),
+						result = this.list_data[2] + '',
+						input = (this.list_data[1] + '').padStart(result.length, ' '),
+						ms = (this.list_data[0] / 1000).toFixed(2);
+					
+					return `Input size : ${input} bytes\nResult size: ${result} bytes\n\nDifference: ${diff} bytes (${perc}%)\n\nTime: ${ms}s`
+				}
+			},
+			
 		},
 		Leaks: {
-			list_title: 'Provided by HTTPLeaks',
+			list_title: 'Provided by https://github.com/cure53/HTTPLeaks',
 			// bool below indicates not inline
 			Doctype: leaksret("<!DOCTYPE html SYSTEM \"https://leaking.via/doctype\">"),
 			'HTML manifest': leaksret("<html xmlns=\"http://www.w3.org/1999/xhtml\" manifest=\"https://leaking.via/html-manifest\">"),
