@@ -1,3 +1,5 @@
+This project has been archived because I no longer want to develop proxies. There are too many aspects to cover and too frequent rewrites. Use an alternative such as https://github.com/titaniumnetwork-dev/alloy .
+
 # SystemYA Proxy
 
 [![Download](https://img.shields.io/npm/dw/sys-proxy?style=for-the-badge)](https://www.npmjs.com/package/sys-proxy)
